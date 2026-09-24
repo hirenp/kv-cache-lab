@@ -453,3 +453,101 @@ The experiment succeeds if I can concretely see that prefill processes the full 
 ## Deferred to V2
 
 Do not add the memory-bandwidth experiment yet. V2 will hold the model fixed, increase context length, and compare fixed model-weight bytes against linearly growing KV-cache bytes. This will connect the basic mechanics to the memory-bandwidth limits of long-context inference.
+
+### Notes for V2
+
+These were checked against the pinned versions (torch 2.14.0, transformers 5.17.0) during V1 review.
+
+- **DynamicCache copies itself on every append.** `DynamicLayer.update` grows K/V with `torch.cat` (`transformers/cache_utils.py`, lines 146-147), which allocates new tensors and copies the whole cache for every layer on every decode step. Per-step memory traffic is then roughly weights + a read and a write of the full cache, not weights + one read of the cache, so timings will grow faster than (weight bytes + KV bytes) / bandwidth. Use a preallocated `StaticCache` for the clean bandwidth model, or measure both and report the difference.
+- **GQA heads are not expanded at the Transformers level.** With an all-ones attention mask, Transformers passes `attention_mask=None` to SDPA and calls it with `enable_gqa=True`; `repeat_kv` was never called in prefill or decode on MPS (30 of 30 layers). Whether PyTorch's MPS SDPA kernel expands the 3 KV heads to 9 internally is not known. Check it, because expansion would make attention read 3× the cache bytes and weaken the GQA saving in the bandwidth model. Passing a real padding mask would change this path.
+- **Timing already brackets a device sync.** `timed_call` calls `torch.mps.synchronize()` before and after the model call, and the `.item()` on argmax runs after the end timestamp. Keep that structure when timing longer contexts.
+- **Tied embeddings.** SmolLM2 has `tie_word_embeddings: true`, so every decode step reads the full 49,152 × 576 embedding matrix for the output projection. Count it in the weight bytes read per step. For an untied model, the input embedding table is read one row per token.
+
+---
+
+# KV Cache Lab V2: Decode cost vs context length
+
+**Goal:** Measure how decode latency grows as the KV cache grows, on the same model and machine as V1, and compare the growth with the bytes each decode step has to move. V1 showed the mechanics. V2 answers whether a decode step gets slower in proportion to the extra bytes.
+
+## V2.1 Scope
+
+- Same model (`HuggingFaceTB/SmolLM2-135M-Instruct`), same dtype (bf16), same pinned versions, same device (MPS, with `--device cpu` supported).
+- New script `kv_bandwidth.py`. Do not change `kv_lab.py`; V1's output is published. Reuse V1 helpers (`sync`, `kv_bytes_per_layer`, `mib`) by importing them rather than copying.
+- The model was trained on up to 8,192 tokens (`max_position_embeddings`). V2 goes past that on purpose: generated text beyond 8,192 tokens is meaningless, but the bytes read are real, and bytes are what V2 measures. Print this once when a length above the limit is used.
+
+## V2.2 CLI
+
+```
+python kv_bandwidth.py
+python kv_bandwidth.py --lengths 512,2048,8192,32768
+python kv_bandwidth.py --steps 100
+python kv_bandwidth.py --cache dynamic
+python kv_bandwidth.py --out results.csv
+```
+
+Defaults: `--lengths 512,1024,2048,4096,8192,16384,32768`, `--steps 50`, `--cache both` (`dynamic`, `static`, or `both`), `--out results.csv`.
+
+## V2.3 Measure the machine's bandwidth
+
+Before any model work, measure achieved GPU memory bandwidth with a large on-device copy (for example a 1 GiB bf16 tensor, `y.copy_(x)`, warmed up, then timed over 20 iterations with a sync before and after). Report GB/s counting both the read and the write. Print it next to Apple's quoted figure (273 GB/s) and use the measured value in every calculation.
+
+## V2.4 Per-length measurement
+
+For each cache type and each context length L:
+
+1. Create a fresh cache. For `static`, preallocate `max_cache_len = L + warmup + steps`.
+2. Fill it with one prefill of L tokens. Token content does not matter; use a seeded random sequence so runs repeat. Do not time the prefill.
+3. Run 5 unmeasured decode steps.
+4. Time `--steps` decode steps individually, with a sync before and after each, as in V1's `timed_call`.
+5. Record length, cache type, KV bytes at the start of the timed steps (from the real tensors), and the median, p10 and p90 step latency.
+
+Also record whether the KV heads were expanded before attention at that length (see V2.6).
+
+Count filled cache slots as `L + warmup steps` rather than calling `get_seq_length()`: with the pinned version, `StaticCache.get_seq_length()` returns a tensor equal to the preallocated capacity, not the filled length.
+
+After all lengths, re-run the first length for the first cache type and report the drift from its first measurement, as a thermal check. Print a warning if the medians differ by more than 5%.
+
+## V2.5 Output
+
+Print a table per cache type:
+
+```
+context   KV MiB   median ms   p10 ms   p90 ms   KV expanded
+    512     11.2        8.06     7.9      8.3    no
+    ...
+```
+
+Write the same rows to the CSV.
+
+Then fit a straight line of median latency against KV bytes, per cache type, and print:
+
+- intercept (ms): the cost of a decode step with an empty cache, which is mostly fixed per-call overhead plus reading the weights;
+- slope, expressed as effective GB/s: KV bytes added per extra millisecond;
+- passes over the cache per step: measured bandwidth divided by effective GB/s. About 1 means each step reads the cache once. Larger values mean each step moves the cache more than once (for example, DynamicCache's copy on every append).
+
+Print the fit's R² so a poor fit is visible.
+
+## V2.6 Explain the StaticCache result
+
+A probe during V1 review found StaticCache slower than DynamicCache on MPS (32k context: 31.9 ms vs 18.2 ms). Before trusting the comparison, find out why, and print the reason in the output. Candidates to check:
+
+- whether Transformers passes an attention mask to SDPA for StaticCache, which disables the `enable_gqa` path and triggers `repeat_kv` (3 KV heads copied to 9 before attention);
+- whether attention runs over the full preallocated length rather than the filled length.
+
+Detect expansion without modifying library source, for example by wrapping `transformers.integrations.sdpa_attention.repeat_kv` with a counter at runtime. Keep that wrapper small and clearly marked as instrumentation.
+
+## V2.7 Acceptance criteria
+
+- Decode latency at each length is reported with median and spread, for both cache types.
+- The measured copy bandwidth is printed and used.
+- The line fit gives an intercept, an effective bandwidth and passes per step, with R².
+- The StaticCache vs DynamicCache difference has an explanation backed by the V2.6 check, or the output says plainly that it is unexplained.
+- The thermal drift check is reported.
+
+## V2.8 Non-goals
+
+Other models, MLX, `torch.compile`, quantization, batching, chunked or paged attention, and any change to `kv_lab.py`.
+
+## V2.9 Blog chart
+
+The CSV feeds an interactive chart in part 2 of the blog post, built as a Hugo shortcode like part 1's slider. It plots latency against context length for both cache types. A slider picks a context length and shows its KV size, latency, and the bytes-per-step estimate. The data is embedded in the shortcode, and there are no external scripts.

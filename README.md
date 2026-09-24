@@ -53,6 +53,33 @@ The `PREFILL_START` / `DECODE_NN_START` markers are `time.perf_counter()` values
 
 After decoding, the lab recomputes every cached position in one uncached pass and compares the result with the cache built one token at a time. In exact arithmetic they are equal, which is why caching works. In floating point they are not bit-identical, most likely because the kernels for a 15-token call and a 1-token call add numbers up in a different order. On the M4 Pro in bf16, about half the elements differ (max 0.125 against values up to about 19), and two of the eleven greedy tokens flip where the top two logits were one bf16 step (0.125) apart. In fp32 the differences shrink to about 1e-5 and every token matches. Results repeat exactly across runs.
 
+## V2: decode cost vs context length
+
+```
+python kv_bandwidth.py
+python kv_bandwidth.py --lengths 512,8192,32768 --steps 20 --cache dynamic
+```
+
+`kv_bandwidth.py` measures the GPU's copy bandwidth, then for each context length (512 to 32,768 tokens) fills the cache with one prefill, times 50 decode steps, and fits a straight line of latency against KV bytes. It runs once with Transformers' default `DynamicCache` and once with a preallocated `StaticCache`, and writes every row to `results.csv`. The full run takes a few minutes. Lengths above 8,192 exceed the model's trained context, so the text is meaningless there, but the bytes each step moves are real.
+
+Results on the M4 Pro (in `results.csv`):
+
+| context | KV MiB | DynamicCache | StaticCache |
+|---:|---:|---:|---:|
+| 517 | 11 | 8.22 ms | 9.44 ms |
+| 2,053 | 45 | 8.67 ms | 10.32 ms |
+| 8,197 | 180 | 10.62 ms | 14.10 ms |
+| 32,773 | 720 | 17.96 ms | 32.08 ms |
+
+Measured copy bandwidth was 212 GB/s (Apple quotes 273 GB/s). The line fit gives an empty-cache cost of about 8 ms for both caches. The slope works out to 2.7 passes over the cache per decode step for `DynamicCache` and 6.4 for `StaticCache` (R² 0.997 and 0.998).
+
+The passes come from how Transformers 5.17 handles each cache:
+
+- `DynamicCache` appends with `torch.cat`, which reads the whole cache and writes a new copy every step, and then attention reads it. That's about 3 passes.
+- `StaticCache` makes Transformers pass an attention mask to SDPA, which turns off grouped-query attention there, so `repeat_kv` expands K and V from 3 heads to 9 before attention on every step (read 3, write 9, then attention reads 9). That's about 7 passes. The `mask` and `KV expanded` columns in the output show this, detected by wrapping the attention function for one extra step after the timed ones. `attn keys` is measured at that step, so it includes the 50 timed tokens.
+
+A thermal check repeats the first measurement at the end; drift was +2.2%.
+
 ## Notes
 
 The prompt goes in as raw text. The chat template is deliberately skipped, because it would add about 30 system-prompt tokens around a 5-token prompt. Greedy decoding does not stop at the end-of-turn token, so longer runs can continue past `<|im_end|>` into a new chat turn. That output is expected.
