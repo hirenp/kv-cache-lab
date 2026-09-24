@@ -13,6 +13,7 @@ import time
 import torch
 import transformers.integrations.sdpa_attention as sdpa_attention
 from transformers import AutoModelForCausalLM, DynamicCache, StaticCache
+from transformers.cache_utils import DynamicLayer
 from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 
 from hardware_info import print_hardware_info
@@ -20,6 +21,11 @@ from kv_lab import MODEL_ID, banner, kv_bytes_per_layer, mib, sync
 
 WARMUP_STEPS = 5
 APPLE_QUOTED_GBPS = 273
+ORIGINAL_SDPA = ALL_ATTENTION_FUNCTIONS["sdpa"]
+KIND_SETS = {
+    "both": ["dynamic", "static"],
+    "all": ["dynamic", "dynamic-inplace", "static", "static-patched"],
+}
 
 
 def measure_bandwidth(device):
@@ -41,55 +47,111 @@ def measure_bandwidth(device):
     return 2 * size / seconds / 1e9
 
 
+class InPlaceLayer(DynamicLayer):
+    # Ablation for "dynamic-inplace": DynamicCache semantics, but preallocate the
+    # buffer and write each new token into its slot instead of torch.cat-ing a
+    # full copy of the cache on every step. keys/values are views of the filled part.
+    def __init__(self, capacity):
+        super().__init__()
+        self.capacity = capacity
+
+    def lazy_initialization(self, key_states, value_states):
+        super().lazy_initialization(key_states, value_states)
+        batch, heads, _, dim = key_states.shape
+        self.key_buffer = key_states.new_empty(batch, heads, self.capacity, dim)
+        self.value_buffer = value_states.new_empty(batch, heads, self.capacity, dim)
+        self.filled = 0
+
+    def update(self, key_states, value_states, *args, **kwargs):
+        if not self.is_initialized:
+            self.lazy_initialization(key_states, value_states)
+        end = self.filled + key_states.shape[-2]
+        self.key_buffer[:, :, self.filled:end] = key_states
+        self.value_buffer[:, :, self.filled:end] = value_states
+        self.filled = end
+        self.keys, self.values = self.key_buffer[:, :, :end], self.value_buffer[:, :, :end]
+        return self.keys, self.values
+
+
 def make_cache(kind, model, capacity):
     if kind == "dynamic":
         return DynamicCache(config=model.config)
+    if kind == "dynamic-inplace":
+        cache = DynamicCache(config=model.config)
+        cache.layers = [InPlaceLayer(capacity) for _ in cache.layers]
+        return cache
     return StaticCache(config=model.config, max_cache_len=capacity)
 
 
-def decode_step(model, token, cache):
+def make_sdpa(filled=None, seen=None):
+    # Wraps Transformers' SDPA attention function without modifying library source.
+    # filled: ablation for "static-patched". On decode steps, attend over only the
+    #   filled cache slots and pass no mask, so Transformers takes its shared-head
+    #   (enable_gqa) path instead of expanding K/V from 3 heads to 9.
+    # seen: instrumentation. Record what SDPA receives, after any trimming.
+    def sdpa(module, query, key, value, attention_mask, **kwargs):
+        if filled is not None and query.shape[2] == 1:
+            n = filled["n"]
+            key, value, attention_mask = key[:, :, :n], value[:, :, :n], None
+        if seen is not None and seen["key_len"] is None:
+            seen["key_len"] = key.shape[2]
+            seen["mask"] = attention_mask is not None
+        return ORIGINAL_SDPA(module, query, key, value, attention_mask, **kwargs)
+    return sdpa
+
+
+def set_attention(filled=None, seen=None):
+    wrapped = filled is not None or seen is not None
+    ALL_ATTENTION_FUNCTIONS["sdpa"] = make_sdpa(filled, seen) if wrapped else ORIGINAL_SDPA
+
+
+def start(model, kind, prompt, capacity):
+    # Prefill into a fresh cache. filled tracks the real cache length for the
+    # ablation; the model reads it on each decode step, with no GPU sync needed.
+    cache = make_cache(kind, model, capacity)
+    filled = {"n": prompt.shape[1]} if kind == "static-patched" else None
+    set_attention(filled)
+    outputs = model(input_ids=prompt, past_key_values=cache, use_cache=True)
+    return outputs.logits[0, -1], outputs.past_key_values, filled
+
+
+def decode_step(model, logits, cache, filled):
+    if filled is not None:
+        filled["n"] += 1  # the slot this step writes
+    token = logits.argmax().view(1, 1)
     outputs = model(input_ids=token, past_key_values=cache, use_cache=True)
-    return outputs.logits[:, -1:].argmax(dim=-1), outputs.past_key_values
+    return outputs.logits[0, -1], outputs.past_key_values
 
 
-def probe_attention(model, device, token, cache):
+def probe_attention(model, device, logits, cache, filled):
     # Instrumentation, not part of the measurement: run one extra decode step
     # with the attention function and repeat_kv wrapped, to see what SDPA gets.
     seen = {"key_len": None, "mask": None, "expanded": 0}
-    original_sdpa = ALL_ATTENTION_FUNCTIONS["sdpa"]
     original_repeat_kv = sdpa_attention.repeat_kv
-
-    def sdpa(module, query, key, value, attention_mask, **kwargs):
-        if seen["key_len"] is None:
-            seen["key_len"] = key.shape[2]
-            seen["mask"] = attention_mask is not None
-        return original_sdpa(module, query, key, value, attention_mask, **kwargs)
 
     def repeat_kv(hidden_states, n_rep):
         seen["expanded"] += 1
         return original_repeat_kv(hidden_states, n_rep)
 
-    ALL_ATTENTION_FUNCTIONS["sdpa"] = sdpa
+    set_attention(filled, seen)
     sdpa_attention.repeat_kv = repeat_kv
     try:
-        decode_step(model, token, cache)
+        decode_step(model, logits, cache, filled)
         sync(device)
     finally:
-        ALL_ATTENTION_FUNCTIONS["sdpa"] = original_sdpa
+        set_attention(filled)
         sdpa_attention.repeat_kv = original_repeat_kv
     return seen
 
 
 def measure_length(model, device, kind, length, steps, generator):
-    # +1 for the probe step after the timed ones.
-    cache = make_cache(kind, model, length + WARMUP_STEPS + steps + 1)
     prompt = torch.randint(0, model.config.vocab_size, (1, length), generator=generator).to(device)
-    outputs = model(input_ids=prompt, past_key_values=cache, use_cache=True)
-    token, cache = outputs.logits[:, -1:].argmax(dim=-1), outputs.past_key_values
-    del outputs, prompt
+    # +1 for the probe step after the timed ones.
+    logits, cache, filled = start(model, kind, prompt, length + WARMUP_STEPS + steps + 1)
+    del prompt
 
     for _ in range(WARMUP_STEPS):
-        token, cache = decode_step(model, token, cache)
+        logits, cache = decode_step(model, logits, cache, filled)
 
     # Count filled slots directly: StaticCache.get_seq_length() reports its capacity here.
     context = length + WARMUP_STEPS
@@ -97,12 +159,13 @@ def measure_length(model, device, kind, length, steps, generator):
     latencies = []
     for _ in range(steps):
         sync(device)
-        start = time.perf_counter()
-        token, cache = decode_step(model, token, cache)
+        begin = time.perf_counter()
+        logits, cache = decode_step(model, logits, cache, filled)
         sync(device)
-        latencies.append((time.perf_counter() - start) * 1000)
+        latencies.append((time.perf_counter() - begin) * 1000)
 
-    seen = probe_attention(model, device, token, cache)
+    seen = probe_attention(model, device, logits, cache, filled)
+    set_attention()
     deciles = statistics.quantiles(latencies, n=10)
     del cache
     if device == "mps":
@@ -118,6 +181,26 @@ def measure_length(model, device, kind, length, steps, generator):
         "mask_passed": seen["mask"],
         "kv_expanded": seen["expanded"] > 0,
     }
+
+
+def check_patch(model, device, generator, length=1024, steps=20):
+    # The ablation is only meaningful if it computes the same thing. Generate the
+    # same greedy sequence with each cache type and compare against StaticCache.
+    prompt = torch.randint(0, model.config.vocab_size, (1, length), generator=generator).to(device)
+    runs = {}
+    for kind in ("static", "static-patched", "dynamic", "dynamic-inplace"):
+        logits, cache, filled = start(model, kind, prompt, length + steps + 1)
+        history = [logits.float()]
+        for _ in range(steps):
+            logits, cache = decode_step(model, logits, cache, filled)
+            history.append(logits.float())
+        set_attention()
+        runs[kind] = torch.stack(history)
+    reference = runs["static"]
+    for kind in ("static-patched", "dynamic", "dynamic-inplace"):
+        same = (runs[kind].argmax(-1) == reference.argmax(-1)).all().item()
+        diff = (runs[kind] - reference).abs().max().item()
+        print(f"  {kind:<15} vs static: greedy tokens match: {same}, max |logit diff|: {diff:.4f}")
 
 
 def fit_line(xs, ys):
@@ -137,12 +220,16 @@ def main():
     parser.add_argument("--device", choices=["mps", "cpu"], default="mps")
     parser.add_argument("--lengths", default="512,1024,2048,4096,8192,16384,32768")
     parser.add_argument("--steps", type=int, default=50)
-    parser.add_argument("--cache", choices=["dynamic", "static", "both"], default="both")
+    parser.add_argument(
+        "--cache",
+        choices=["dynamic", "dynamic-inplace", "static", "static-patched", "both", "all"],
+        default="both",
+    )
     parser.add_argument("--out", default="results.csv")
     args = parser.parse_args()
     device = args.device
     lengths = [int(n) for n in args.lengths.split(",")]
-    kinds = ["dynamic", "static"] if args.cache == "both" else [args.cache]
+    kinds = KIND_SETS.get(args.cache, [args.cache])
 
     print_hardware_info(device)
     if device == "mps" and not torch.backends.mps.is_available():
@@ -181,6 +268,11 @@ def main():
     with torch.inference_mode():
         # Unmeasured warmup of both call shapes, as in V1.
         measure_length(model, device, kinds[0], lengths[0], 5, generator)
+
+        if {"static-patched", "dynamic-inplace"} & set(kinds):
+            banner("ABLATION CORRECTNESS CHECK")
+            check_patch(model, device, generator)
+            print()
 
         for kind in kinds:
             banner(f"DECODE LATENCY, {kind.upper()} CACHE")
