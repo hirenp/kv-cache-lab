@@ -1,6 +1,7 @@
 """Hardware and software preflight for KV Cache Lab."""
 
 import platform
+import shutil
 import subprocess
 import sys
 
@@ -9,6 +10,8 @@ import transformers
 
 
 def sysctl(name):
+    if shutil.which("sysctl") is None:  # absent on minimal Linux images (e.g. Modal)
+        return None
     result = subprocess.run(["sysctl", "-n", name], capture_output=True, text=True)
     return result.stdout.strip() if result.returncode == 0 else None
 
