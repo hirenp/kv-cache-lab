@@ -551,3 +551,73 @@ Other models, MLX, `torch.compile`, quantization, batching, chunked or paged att
 ## V2.9 Blog chart
 
 The CSV feeds an interactive chart in part 2 of the blog post, built as a Hugo shortcode like part 1's slider. It plots latency against context length for both cache types. A slider picks a context length and shows its KV size, latency, and the bytes-per-step estimate. The data is embedded in the shortcode, and there are no external scripts.
+
+---
+
+# KV Cache Lab V3: Moving a KV cache vs rebuilding it
+
+**Goal:** Measure, on one datacenter GPU, how long it takes to rebuild a KV cache with prefill versus bring an existing cache back from somewhere else (another GPU buffer, host memory, local disk, network storage), across context lengths, and find the break-even for each place. This is the trade-off behind KV offload, prefix caching and disaggregated inference: ship the cache or recompute it.
+
+## V3.1 Scope
+
+- New script `kv_offload.py`. Reuse helpers from `kv_bandwidth.py` (`sync`, bandwidth benchmark) by importing them. Do not change V1 or V2 behaviour.
+- Device: CUDA only (H100). Runs on Modal through `modal_run.py`, or directly on an SSH-accessible box.
+- Two models:
+  - `HuggingFaceTB/SmolLM2-135M-Instruct`, for continuity with parts 1 and 2. Prefill is cheap here, so recompute is expected to win at most lengths.
+  - One realistic 7B/8B-class model with GQA that does not need a gated licence, e.g. `Qwen/Qwen2.5-7B-Instruct`. Read layers, KV heads and head_dim from the config at runtime and measure bytes per token from real tensors, as in V1; do not hard-code them. Expected about 57 KB per token in bf16 (28 layers × 2 × 4 KV heads × 128 × 2 bytes), to be verified.
+- Context lengths: 1k, 4k, 16k, 32k, capped at each model's trained context (`max_position_embeddings`). Unlike V2, stay within the trained context, because this experiment decodes after reloading and checks the output.
+- bf16, batch 1, greedy, pinned library versions.
+
+## V3.2 What to time
+
+For each model and context length L:
+
+1. **Recompute:** prefill L tokens into a fresh cache. This is the cost of rebuilding. Median of 5 runs after 1 warmup.
+2. **Offload:** copy the filled cache's K/V tensors (all layers) from GPU to each tier. Report time and GB/s. Allocation happens before timing.
+3. **Reload:** copy the cache back from each tier into preallocated GPU tensors, ready for decode. Report time and GB/s.
+
+Tiers:
+
+| Tier | Offload | Reload |
+|---|---|---|
+| GPU → GPU (another buffer in HBM) | device copy | device copy |
+| Host RAM, pinned | `copy_` to pinned CPU tensors | `copy_` back, non_blocking + sync |
+| Host RAM, pageable | `copy_` to ordinary CPU tensors | `copy_` back |
+| Local disk | write one file per run (raw bytes), fsync | read file into pinned memory, then copy to GPU |
+| Network storage (Modal Volume or NFS, if available) | as local disk | as local disk |
+
+For disk tiers, report whether the read could have come from the OS page cache. On Modal we cannot drop caches, so the reported disk reload may be a warm read; say so in the output. On a box with root, drop caches (`echo 3 > /proc/sys/vm/drop_caches`) before each cold read and report both cold and warm.
+
+Every timed region brackets a `torch.cuda.synchronize()`.
+
+## V3.3 Correctness
+
+A reloaded cache must be the same bytes. For each tier, after reloading, decode 20 greedy tokens from the reloaded cache and from the original cache, and check that tokens match and logits are bit-identical. This is the baseline part 2's update recommended for testing offload systems: diff against a normal cached run, not a recompute.
+
+## V3.4 Output
+
+Per model, a table:
+
+```
+context  KV MiB  recompute ms  GPU ms  pinned ms  pageable ms  disk ms  net ms   (reload)
+```
+
+plus the same for offload, the measured GB/s per tier, and the H100's copy bandwidth from V2's benchmark.
+
+Then the break-even per tier: the smallest context length at which reload is faster than recompute, or "reload always faster" / "recompute always faster" within the tested range. Also print the ratio recompute / reload at the largest context.
+
+Write all rows to a CSV.
+
+## V3.5 Network prediction (labelled as a prediction)
+
+Using the measured bytes per token, print the predicted time to move each context's cache over named links, for comparison with recompute: 100 Gb/s and 400 Gb/s Ethernet/InfiniBand, and PCIe host-to-device as measured. Label these clearly as `bytes / nominal link speed` estimates, not measurements. This is the number disaggregated inference pays to move a cache from a prefill machine to a decode machine.
+
+## V3.6 Known pitfalls
+
+- cuDNN attention on H100 has a large per-new-shape cost (found during V2 follow-up: DynamicCache decode 62 ms vs 14 ms with cuDNN SDPA disabled). Prefill uses a fixed shape per length, so it is unaffected, but the correctness decode steps are not. Disable cuDNN SDPA for the decode checks, and record the setting.
+- Give the container real CPU cores (8) and enough ephemeral disk for the largest cache; a 32k cache on a 7B model is about 1.8 GB.
+- First run downloads the 7B model (~15 GB) into the cache volume; do not time it.
+
+## V3.7 Non-goals
+
+Real cross-machine transfer (RDMA, NIXL), GPUDirect Storage, cache compression or quantization, vLLM/SGLang, prefix-matching logic, and batching. V3.5 predicts network cost; measuring it needs two machines.
