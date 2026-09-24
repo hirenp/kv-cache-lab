@@ -1,0 +1,58 @@
+# KV Cache Lab V1
+
+Prefill vs decode on Apple Silicon, made visible. `kv_lab.py` runs SmolLM2-135M-Instruct one model call at a time, prints the Q/K/V projection shapes for each call, and shows the KV cache growing by one token per decode step.
+
+Write-up: [Watching a KV cache grow (part 1)](https://hiren.me/posts/watching-a-kv-cache-grow/). The spec the code was built from is in [SPEC.md](SPEC.md).
+
+## Run
+
+Tested with Python 3.11. Newer Python versions may work but are untested with the pinned torch version. If you don't have Python 3.11, `uv venv --python 3.11 .venv` fetches one and creates the venv.
+
+```
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python hardware_info.py
+python kv_lab.py
+```
+
+Other options:
+
+```
+python kv_lab.py --prompt "Explain why the sky is blue"
+python kv_lab.py --device cpu
+python kv_lab.py --decode-steps 20
+python kv_lab.py --dtype float32
+```
+
+The first run downloads the model (about 270 MB) from Hugging Face. Tested with Python 3.11, torch 2.14.0, and transformers 5.17.0 on an M4 Pro with macOS 26.6. The cache-inspection code uses the transformers 5.x cache API (`cache.layers[i].keys`), so keep the pinned versions.
+
+## What the output shows
+
+**Prefill** is the first model call. It runs every prompt token through the model in a single forward pass. Each layer computes Q, K and V for all N prompt tokens at once, and the K and V tensors are stored in the KV cache. The logits for the last prompt token pick the first generated token.
+
+**Decode** is every call after that. Each call feeds exactly one token, the one generated last, together with the cache from the previous call. The model computes Q, K and V for that one token only. The Q/K/V hook lines show a sequence dimension of N during prefill and 1 during decode.
+
+**The KV cache** holds the keys and values of every token processed so far, per layer, with shape `[batch, kv_heads, sequence_length, head_dim]`. Attention for a new token needs the keys and values of all earlier tokens. The cache lets decode reuse them instead of recomputing them from the whole sequence on every step.
+
+**The cache grows by one token per decode step** because each decode call processes one new token, and that token's K and V are appended to every layer. Nothing else changes: old entries are never rewritten. With 10 decode steps on a 5-token prompt, the cache goes 0 → 5 → 6 → ... → 15.
+
+**Decode still reads the whole cache.** Computing new K/V is O(1) per step, but the new token's query attends to every cached key, so each step reads the entire cache. That per-step cost grows with context length. V2 measures it.
+
+SmolLM2-135M uses grouped-query attention with 9 query heads and 3 KV heads. That is why `k_proj` and `v_proj` outputs are 192 wide while `q_proj` is 576, and why the cache stores 3 heads per layer. In bf16 each cached token costs 30 layers × 2 (K, V) × 3 heads × 64 dims × 2 bytes = 23,040 bytes. The lab measures this from the real tensors and checks it against the formula.
+
+N decode steps produce N + 1 generated tokens: one from the prefill logits and one from each decode call. The last one is never fed back, so the final cache length is prompt + N.
+
+## Reading the timings
+
+At 135M parameters and a handful of tokens, Python and kernel-launch overhead dominate. Prefill and decode latencies land close together (around 8 to 10 ms each on an M4 Pro), so "prefill tokens/sec" says little about the hardware. In V1 the timings exist to validate the measurement harness: MPS is synchronized before and after each call, and hook output is buffered so terminal I/O stays out of the measured interval. V2 makes the numbers meaningful by growing the context.
+
+The `PREFILL_START` / `DECODE_NN_START` markers are `time.perf_counter()` values, meant for lining up model calls with an Instruments / Metal System Trace capture later.
+
+## Recompute check
+
+After decoding, the lab recomputes every cached position in one uncached pass and compares the result with the cache built one token at a time. In exact arithmetic they are equal, which is why caching works. In floating point they are not bit-identical, most likely because the kernels for a 15-token call and a 1-token call add numbers up in a different order. On the M4 Pro in bf16, about half the elements differ (max 0.125 against values up to about 19), and two of the eleven greedy tokens flip where the top two logits were one bf16 step (0.125) apart. In fp32 the differences shrink to about 1e-5 and every token matches. Results repeat exactly across runs.
+
+## Notes
+
+The prompt goes in as raw text. The chat template is deliberately skipped, because it would add about 30 system-prompt tokens around a 5-token prompt. Greedy decoding does not stop at the end-of-turn token, so longer runs can continue past `<|im_end|>` into a new chat turn. That output is expected.
