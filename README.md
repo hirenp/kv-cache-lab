@@ -1,8 +1,8 @@
-# KV Cache Lab V1
+# KV Cache Lab
 
 Prefill vs decode on Apple Silicon, made visible. `kv_lab.py` runs SmolLM2-135M-Instruct one model call at a time, prints the Q/K/V projection shapes for each call, and shows the KV cache growing by one token per decode step.
 
-Write-up: [Watching a KV cache grow (part 1)](https://hiren.me/posts/watching-a-kv-cache-grow/). The spec the code was built from is in [SPEC.md](SPEC.md).
+Write-ups: [part 1](https://hiren.me/posts/watching-a-kv-cache-grow/) (`kv_lab.py`), [part 2](https://hiren.me/posts/watching-a-kv-cache-grow-part-2/) (`kv_bandwidth.py`), [part 3](https://hiren.me/posts/watching-a-kv-cache-grow-part-3/) (`kv_offload.py`). The spec the code was built from is in [SPEC.md](SPEC.md).
 
 ## Run
 
@@ -79,6 +79,16 @@ The passes come from how Transformers 5.17 handles each cache:
 - `StaticCache` makes Transformers pass an attention mask to SDPA, which turns off grouped-query attention there, so `repeat_kv` expands K and V from 3 heads to 9 before attention on every step (read 3, write 9, then attention reads 9). That's about 7 passes. The `mask` and `KV expanded` columns in the output show this, detected by wrapping the attention function for one extra step after the timed ones. `attn keys` is measured at that step, so it includes the 50 timed tokens.
 
 A thermal check repeats the first measurement at the end; drift was +2.2%.
+
+`--cache all` adds two ablations that remove those copies: `dynamic-inplace` (a preallocated buffer written in place) and `static-patched` (attention over the filled slots only, no head expansion). Both give bit-identical output and drop to about 1.3 passes (`results_ablation.csv`).
+
+## V3: moving a cache vs rebuilding it
+
+```
+modal run modal_run.py --script kv_offload.py --args "--net-dir /net" --out results_offload.csv
+```
+
+`kv_offload.py` needs a CUDA GPU; `modal_run.py` runs it on a Modal H100 (after `pip install modal` and `modal setup`). For each model and context length it times a prefill (recompute), then copies the cache to GPU memory, pinned and pageable host RAM, local disk and a Modal Volume and back, and checks each reloaded cache decodes bit-identically. Results are in `results_offload.csv`: for Qwen2.5-7B at 32k tokens, recompute takes 1,201 ms and reload takes 68 ms (pinned RAM) to 563 ms (Volume). On H100, disable cuDNN attention for decode with a growing cache (`torch.backends.cuda.enable_cudnn_sdp(False)`); with it on, each decode step paid about 48 ms extra because the key length changes every step.
 
 ## Notes
 
