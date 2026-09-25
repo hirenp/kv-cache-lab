@@ -2,7 +2,7 @@
 
 Prefill vs decode on Apple Silicon, made visible. `kv_lab.py` runs SmolLM2-135M-Instruct one model call at a time, prints the Q/K/V projection shapes for each call, and shows the KV cache growing by one token per decode step.
 
-Write-ups: [part 1](https://hiren.me/posts/watching-a-kv-cache-grow/) (`kv_lab.py`), [part 2](https://hiren.me/posts/watching-a-kv-cache-grow-part-2/) (`kv_bandwidth.py`), [part 3](https://hiren.me/posts/watching-a-kv-cache-grow-part-3/) (`kv_offload.py`). The spec the code was built from is in [SPEC.md](SPEC.md).
+Write-ups: [part 1](https://hiren.me/posts/watching-a-kv-cache-grow/) (`kv_lab.py`), [part 2](https://hiren.me/posts/watching-a-kv-cache-grow-part-2/) (`kv_bandwidth.py`), [part 3](https://hiren.me/posts/watching-a-kv-cache-grow-part-3/) (`kv_offload.py`). The [inference disaggregation](https://hiren.me/posts/inference-disaggregation-part-1/) series continues with `kv_interference.py` (part 1) and `kv_disagg.py` (part 2). The spec the code was built from is in [SPEC.md](SPEC.md).
 
 ## Run
 
@@ -89,6 +89,19 @@ modal run modal_run.py --script kv_offload.py --args "--net-dir /net" --out resu
 ```
 
 `kv_offload.py` needs a CUDA GPU; `modal_run.py` runs it on a Modal H100 (after `pip install modal` and `modal setup`). For each model and context length it times a prefill (recompute), then copies the cache to GPU memory, pinned and pageable host RAM, local disk and a Modal Volume and back, and checks each reloaded cache decodes bit-identically. Results are in `results_offload.csv`: for Qwen2.5-7B at 32k tokens, recompute takes 1,201 ms and reload takes 68 ms (pinned RAM) to 563 ms (Volume). On H100, disable cuDNN attention for decode with a growing cache (`torch.backends.cuda.enable_cudnn_sdp(False)`); with it on, each decode step paid about 48 ms extra because the key length changes every step.
+
+## Inference disaggregation (two GPUs)
+
+Both scripts need two CUDA GPUs on one machine; `modal_run.py` runs them on a Modal `H100:2`.
+
+```
+modal run modal_run.py --script kv_interference.py --args "" --out results_interference.csv
+modal run modal_run.py --script kv_disagg.py --args "" --out results_disagg.csv
+```
+
+`kv_interference.py` (part 1): user A decodes while request B arrives with a long prompt. It records every gap between A's tokens and B's time to first token when B's prefill runs on A's GPU (colocated), in chunks between A's steps (chunked), or on the other GPU in a thread or a separate process. At 32k tokens, colocated stalls A for 1,472 ms; the separate process leaves A's worst gap at 26 ms. The thread version still stalls A (1,161 ms); the cause is untraced, possibly the Python interpreter lock the two threads share.
+
+`kv_disagg.py` (part 2): prefill on GPU 0, decode on GPU 1. It measures the GPU-to-GPU link (395 GB/s over NVLink) and the cost of copying the cache after prefill or layer by layer during it. At 32k tokens the copy takes 5.7 ms, 0.5% of prefill; layer-by-layer copying didn't help.
 
 ## Notes
 

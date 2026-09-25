@@ -621,3 +621,83 @@ Using the measured bytes per token, print the predicted time to move each contex
 ## V3.7 Non-goals
 
 Real cross-machine transfer (RDMA, NIXL), GPUDirect Storage, cache compression or quantization, vLLM/SGLang, prefix-matching logic, and batching. V3.5 predicts network cost; measuring it needs two machines.
+
+---
+
+# KV Cache Lab V4: Inference disaggregation, part 2 (moving the cache between GPUs)
+
+**Goal:** On one machine with two NVLink-connected H100s, measure what it costs to run prefill on GPU 0 and decode on GPU 1 instead of both on GPU 0: how long the KV cache transfer takes, how much it delays the first decode step, and how much of it can be hidden by sending the cache layer by layer while prefill is still running.
+
+Part 3 predicted this cost from link speeds; V4 measures it on a real GPU-to-GPU link.
+
+## V4.1 Scope
+
+- New script `kv_disagg.py`. Reuse helpers from `kv_offload.py` and `kv_bandwidth.py` by importing them. Do not change earlier scripts' behaviour.
+- Hardware: Modal `gpu="H100:2"` via `modal_run.py`. Print `nvidia-smi topo -m` and `torch.cuda.can_device_access_peer(0, 1)` so the post can state whether the two GPUs talk over NVLink or PCIe. If they are PCIe-only, stop and report rather than publishing numbers as NVLink.
+- Model: `Qwen/Qwen2.5-7B-Instruct`, one copy loaded on each GPU. Context lengths 1k, 4k, 16k, 32k. bf16, batch 1, greedy.
+- cuDNN attention disabled for decode steps (see V3.6).
+
+## V4.2 Link bandwidth
+
+Before the model work, measure GPU 0 → GPU 1 copy bandwidth with a 1 GiB tensor, as V2 did for on-device copies. Report GB/s. This is the number to compare with Part 3's pinned host RAM (about 27 GB/s) and the nominal network links.
+
+## V4.3 What to time
+
+For each context length L, median of 5 runs after 1 warmup, with syncs on both GPUs around each timed region:
+
+1. **Colocated:** prefill L tokens on GPU 0, then one decode step on GPU 0. Report prefill time and time until the first decode step finishes.
+2. **Disaggregated, bulk:** prefill on GPU 0, then copy the whole cache (all layers' K/V) to preallocated tensors on GPU 1, then one decode step on GPU 1. Report the transfer time on its own and the time until the first decode step finishes.
+3. **Disaggregated, layer by layer:** prefill on GPU 0 with a forward hook on each decoder layer that, as soon as the layer finishes, starts copying that layer's K/V to GPU 1 on a separate CUDA stream. Then one decode step on GPU 1 once all copies are done. Report the exposed transfer time: (time until all copies finish) minus (prefill time alone).
+
+The headline numbers per length are prefill time, bulk transfer time, exposed layer-by-layer transfer time, and each as a percentage of prefill.
+
+## V4.4 Correctness
+
+Decode 20 greedy tokens colocated on GPU 0 and disaggregated on GPU 1 (from both transfer methods). Tokens must match. Report whether logits are bit-identical; different GPUs of the same model should give identical results, but if they do not, report the max difference rather than failing.
+
+## V4.5 Output
+
+A table per context length (prefill, bulk transfer, layer-wise exposed transfer, overhead %), the measured GPU-to-GPU bandwidth, the topology printout, and the correctness results. Write rows to a CSV. For comparison, also print Part 3's predicted network transfer times for the same cache sizes (bytes / nominal link speed, labelled as predictions).
+
+## V4.6 Non-goals
+
+Interference between prefill and decode on a shared GPU (a later post), attention/FFN disaggregation, cross-machine transfer, NIXL/NCCL-based transfer libraries, vLLM/SGLang, batching.
+
+---
+
+# KV Cache Lab V5: Inference disaggregation, part 1 (why split: interference)
+
+**Goal:** Show the problem disaggregation exists to solve. One user is decoding on a GPU; a new request with a long prompt arrives and its prefill runs on the same GPU. Measure how long the decoding user waits between tokens, compare with chunked prefill (the usual fix without a second GPU), and with prefill on a separate GPU. V4 (part 2) then measures what that separation costs.
+
+## V5.1 Scope
+
+- New script `kv_interference.py`. Reuse helpers from `kv_disagg.py`, `kv_offload.py` and `kv_bandwidth.py`. Do not change earlier scripts' behaviour.
+- Hardware and model as V4: Modal `H100:2` with NVLink, `Qwen/Qwen2.5-7B-Instruct` loaded on each GPU, bf16, greedy, cuDNN attention off for decode steps.
+- Scheduling is modelled the way serving engines do it, one iteration at a time: each iteration runs either a decode step for user A or a piece of prefill work for request B. There is no true simultaneous sharing of one GPU; that is out of scope.
+
+## V5.2 Scenario
+
+- User A has a 1,024-token prompt, already prefilled, and decodes 80 tokens.
+- Request B arrives just before A's 20th decode step, with a prompt of L tokens, L in 4k, 16k and 32k (one run per L).
+- Record, for every decode step of A, the wall time since A's previous token, with a sync on both GPUs so each gap includes all work the scheduler ran in between. Also record B's time to first token: from arrival to B's first generated token being available.
+
+## V5.3 Modes
+
+1. **Colocated:** B's whole prefill runs on GPU 0 between two of A's decode steps, also on GPU 0. A's gap at that step includes all of B's prefill.
+2. **Chunked prefill:** B's prompt is fed in chunks of C tokens (C = 512 and 2,048), each chunk a forward call that appends to B's cache. The scheduler alternates one chunk of B with one decode step of A until B's prefill is done, all on GPU 0.
+3. **Disaggregated, thread:** A decodes on GPU 1. B's prefill runs on GPU 0 in a separate thread of the same process, then B's cache is copied to GPU 1 (bulk, as V4). A's decode loop does not wait for B on the GPU, but both threads share one Python interpreter lock.
+4. **Disaggregated, process:** as above, but B's prefill runs in a separate worker process with its own copy of the model on GPU 0 (spawned with `torch.multiprocessing`, fed prompts over a queue). B's cache stays on GPU 0; V4 measures the copy. B's time to first token uses the worker's `perf_counter` timestamp, which is comparable across processes on Linux (CLOCK_MONOTONIC).
+
+Finding from the first full run: the thread version stalled A for most of B's prefill (1,161 ms at 32k) even though the GPUs are separate; the process version did not (worst gap 26 ms). Keep both modes so the difference is reproducible.
+
+## V5.4 Correctness
+
+A's 80 generated tokens must be identical across all modes: the scheduling changes when A's steps run, not what they compute. For chunked mode, also check that B's first token matches B's first token from a single unchunked prefill.
+
+## V5.5 Output
+
+Per mode and L: A's median gap, A's worst gap, the number of A's gaps above 2× the median, and B's time to first token. Write every one of A's gaps to a CSV (mode, L, step, gap_ms) so the post can chart gap over time: a spike for colocated, a run of smaller bumps for chunked, flat for disaggregated.
+
+## V5.6 Non-goals
+
+Batched decode of many users, B decoding after its first token, true concurrent execution of prefill and decode on one GPU (streams, MPS, time-slicing), vLLM/SGLang, and cross-machine transfer.
