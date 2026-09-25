@@ -1,7 +1,6 @@
 """Run a lab script on a Modal GPU and save its output locally.
 
     modal run modal_run.py                                   # kv_bandwidth.py, four-cache sweep on an H100
-    modal run modal_run.py --args "--cache static-compiled"  # the compiled StaticCache run
     modal run modal_run.py --script kv_offload.py --args "--net-dir /net" --out results_offload.csv
 
 The printed report goes to stdout and the CSV to --out (default results_h100.csv).

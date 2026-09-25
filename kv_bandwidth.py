@@ -113,19 +113,6 @@ def set_attention(filled=None, seen=None):
     ALL_ATTENTION_FUNCTIONS["sdpa"] = make_sdpa(filled, seen) if wrapped else ORIGINAL_SDPA
 
 
-def compile_decode(model, device):
-    # "static-compiled": compile only the decode step, the setup StaticCache exists
-    # for. On CUDA, reduce-overhead also captures the step as a CUDA graph, which
-    # removes most per-kernel launch cost. Prefill stays eager.
-    torch._dynamo.config.cache_size_limit = 64  # each context length is a new cache shape
-    forward = torch.compile(model.forward, mode="reduce-overhead" if device == "cuda" else "default")
-
-    def decode(**kwargs):
-        torch.compiler.cudagraph_mark_step_begin()
-        return forward(**kwargs)
-    return decode
-
-
 def start(model, kind, prompt, capacity):
     # Prefill into a fresh cache. filled tracks the real cache length for the
     # ablation; the model reads it on each decode step, with no GPU sync needed.
@@ -165,17 +152,14 @@ def probe_attention(model, device, logits, cache, filled):
     return seen
 
 
-def measure_length(model, device, kind, length, steps, generator, decode=None):
-    # decode runs the warmup and timed steps (the compiled step for
-    # "static-compiled"); prefill and the probe always use the eager model.
-    decode = decode or model
+def measure_length(model, device, kind, length, steps, generator):
     prompt = torch.randint(0, model.config.vocab_size, (1, length), generator=generator).to(device)
     # +1 for the probe step after the timed ones.
     logits, cache, filled = start(model, kind, prompt, length + WARMUP_STEPS + steps + 1)
     del prompt
 
     for _ in range(WARMUP_STEPS):
-        logits, cache = decode_step(decode, logits, cache, filled)
+        logits, cache = decode_step(model, logits, cache, filled)
 
     # Count filled slots directly: StaticCache.get_seq_length() reports its capacity here.
     context = length + WARMUP_STEPS
@@ -184,7 +168,7 @@ def measure_length(model, device, kind, length, steps, generator, decode=None):
     for _ in range(steps):
         sync(device)
         begin = time.perf_counter()
-        logits, cache = decode_step(decode, logits, cache, filled)
+        logits, cache = decode_step(model, logits, cache, filled)
         sync(device)
         latencies.append((time.perf_counter() - begin) * 1000)
 
@@ -248,7 +232,7 @@ def main():
     parser.add_argument("--steps", type=int, default=50)
     parser.add_argument(
         "--cache",
-        choices=["dynamic", "dynamic-inplace", "static", "static-patched", "static-compiled", "both", "all"],
+        choices=["dynamic", "dynamic-inplace", "static", "static-patched", "both", "all"],
         default="both",
     )
     parser.add_argument("--out", default="results.csv")
@@ -294,15 +278,10 @@ def main():
 
     # ---- Sweep ---------------------------------------------------------------
     generator = torch.Generator().manual_seed(0)
-    compiled = compile_decode(model, device) if "static-compiled" in kinds else None
-
-    def decoder(kind):
-        return compiled if kind == "static-compiled" else None
-
     rows = []
     with torch.inference_mode():
         # Unmeasured warmup of both call shapes, as in V1.
-        measure_length(model, device, kinds[0], lengths[0], 5, generator, decoder(kinds[0]))
+        measure_length(model, device, kinds[0], lengths[0], 5, generator)
 
         if {"static-patched", "dynamic-inplace"} & set(kinds):
             banner("ABLATION CORRECTNESS CHECK")
@@ -314,7 +293,7 @@ def main():
             print(f"  {'context':>7}  {'KV MiB':>7}  {'median ms':>9}  {'p10 ms':>6}  {'p90 ms':>6}"
                   f"  {'attn keys':>9}  {'mask':>4}  {'KV expanded':>11}")
             for length in lengths:
-                row = measure_length(model, device, kind, length, args.steps, generator, decoder(kind))
+                row = measure_length(model, device, kind, length, args.steps, generator)
                 rows.append(row)
                 print(
                     f"  {row['context']:>7}  {mib(row['context'] * bytes_per_token):>7.1f}"
@@ -326,9 +305,7 @@ def main():
 
         # Thermal check: repeat the first measurement after the machine has been busy.
         first = rows[0]
-        again = measure_length(
-            model, device, first["cache"], lengths[0], args.steps, generator, decoder(first["cache"])
-        )
+        again = measure_length(model, device, first["cache"], lengths[0], args.steps, generator)
     drift = (again["median_ms"] - first["median_ms"]) / first["median_ms"] * 100
 
     # ---- Fit -----------------------------------------------------------------
@@ -345,16 +322,6 @@ def main():
         print(f"  passes over the cache/step:   {bandwidth / effective_gbps:.1f}  (measured bandwidth / effective)")
         print(f"  fit R^2:                      {r2:.4f}")
     print()
-
-    if compiled is not None:
-        # A silent fallback to eager would make the compiled numbers meaningless.
-        counters = torch._dynamo.utils.counters
-        banner("COMPILE CHECK")
-        print(f"Compiled graphs: {counters['stats']['unique_graphs']}")
-        print(f"Graph breaks:    {sum(counters['graph_break'].values())}")
-        for reason, count in counters["graph_break"].items():
-            print(f"  {count} x {reason}")
-        print()
 
     banner("THERMAL CHECK")
     print(f"First {first['cache']} run at {first['context']} tokens: {first['median_ms']:.2f} ms")
