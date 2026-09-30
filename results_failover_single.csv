@@ -1,0 +1,7 @@
+strategy,a_restart_s,continue_input,detect_s,error,finish_s,matches_reference,prompt_tokens,reference_total_s,reference_ttft_s,resume_ttft_s,tokens_before_failure,tokens_generated
+restart,,,0.047,StreamEndedWithoutDone,3.08,True,1042,3.43,0.386,0.037,128,512
+continue,69.1,token_ids,0.047,StreamEndedWithoutDone,2.32,True,1042,3.43,0.386,0.041,128,384
+restart,,,0.058,StreamEndedWithoutDone,3.34,True,8692,3.35,0.231,0.225,128,512
+continue,59.1,token_ids,0.058,StreamEndedWithoutDone,2.56,True,8692,3.35,0.231,0.223,128,384
+restart,,,0.056,StreamEndedWithoutDone,4.2,True,27872,4.2,0.894,0.892,128,512
+continue,59.1,token_ids,0.056,StreamEndedWithoutDone,3.35,False,27872,4.2,0.894,0.878,128,384
