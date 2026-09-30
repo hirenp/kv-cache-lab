@@ -1,12 +1,14 @@
 """What happens to requests in flight when an inference worker dies, and what does recovering them cost?
 
-    modal run --detach kv_failover.py
+    modal run --detach kv_failover.py            # unplanned failures (SPEC.md V8)
+    modal run --detach kv_failover.py --drain    # planned shutdown with SIGTERM (SPEC.md V9)
     modal run kv_failover.py --collect
 
 Two vLLM replicas on one two-GPU Modal machine; this script is the client and the router.
 Replica A is killed (or frozen) partway through a streamed answer and replica B takes over,
-either restarting the answer or continuing it (see SPEC.md V8). The run saves its results to
-a Modal volume as it goes; --collect writes results_failover_*.csv and failover_logs/.
+either restarting the answer or continuing it. --drain instead sends one replica the SIGTERM a
+Kubernetes rollout sends, with answers still streaming. The runs save their results to a Modal
+volume as they go; --collect writes results_failover_*.csv and failover_logs/.
 """
 
 import csv
@@ -37,7 +39,7 @@ class Replica:
     """One `vllm serve` process on one GPU, in its own process group so it can be killed or frozen whole."""
 
     def __init__(self, name, gpu, port):
-        self.name, self.gpu, self.port, self.proc, self.starts = name, gpu, port, None, 0
+        self.name, self.gpu, self.port, self.proc, self.starts, self.extra = name, gpu, port, None, 0, []
 
     def start(self):
         import os
@@ -46,7 +48,8 @@ class Replica:
         log = open(f"/tmp/{self.name}-{self.starts}.log", "w")
         # Prefix caching is off, so a replica never has a prompt cached from an earlier attempt.
         self.proc = subprocess.Popen(
-            ["vllm", "serve", MODEL, "--port", str(self.port), "--max-model-len", "32768", "--no-enable-prefix-caching"],
+            ["vllm", "serve", MODEL, "--port", str(self.port), "--max-model-len", "32768", "--no-enable-prefix-caching",
+             *self.extra],
             env={**os.environ, "HF_HOME": "/hf", "CUDA_VISIBLE_DEVICES": str(self.gpu)},
             stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
 
@@ -241,6 +244,67 @@ def under_load(a, b, strategy, users=8, prompt_lines=120, max_tokens=2048, kill_
     return rows
 
 
+def drain(replica, users=5, max_tokens=2048, term_after_s=3.0, grace_s=90):
+    """Send SIGTERM to vLLM's main process, as Kubernetes does to a pod's main process, with answers streaming."""
+    import os
+    import signal
+    import threading
+    import urllib.request
+    outs = [None] * users
+
+    def user(i):
+        outs[i] = stream(replica.port, make_prompt(50, seed=i), max_tokens, timeout=grace_s + 30)
+    threads = [threading.Thread(target=user, args=(i,)) for i in range(users)]
+    for t in threads:
+        t.start()
+    time.sleep(term_after_s)
+    t_term = time.time()
+    os.kill(replica.proc.pid, signal.SIGTERM)
+    time.sleep(0.5)
+    # What a new request sees while the replica shuts down.
+    try:
+        urllib.request.urlopen(f"http://localhost:{replica.port}/health", timeout=5)
+        new_request = "health answered"
+    except Exception as e:
+        new_request = type(e).__name__ + ": " + str(e)[:80]
+    try:
+        replica.proc.wait(timeout=grace_s)
+        exit_s, killed = round(time.time() - t_term, 1), False
+    except Exception:  # still running when the grace period ends: Kubernetes would SIGKILL it
+        os.killpg(replica.proc.pid, signal.SIGKILL)
+        replica.proc.wait()
+        exit_s, killed = round(time.time() - t_term, 1), True
+    for t in threads:
+        t.join()
+    rows = []
+    for i, o in enumerate(outs):
+        rows.append({"shutdown_flags": " ".join(replica.extra) or "(default)", "user": i,
+                     "tokens": len(o["times"]), "tokens_after_sigterm": sum(t > t_term for t in o["times"]),
+                     "completed": o["error"] is None, "error": o["error"],
+                     "ended_after_sigterm_s": round((o["error_time"] or o["times"][-1]) - t_term, 2),
+                     "process_exit_s": exit_s, "sigkilled_at_grace": killed, "health_during_shutdown": new_request})
+    return rows
+
+
+@app.function(gpu="H100!", image=image, volumes={"/hf": hf_cache, "/results": results}, timeout=3600,
+              single_use_containers=True, cpu=8.0, memory=65536)
+def run_drain():
+    import subprocess
+    flags = "".join(subprocess.run(["vllm", "serve", h], capture_output=True, text=True).stdout for h in ("--help", "--help=all"))
+    save("drain_help", [l for l in flags.splitlines() if "shutdown" in l.lower()])
+    d = Replica("d", 0, 8001)
+    d.start()
+    d.wait_healthy()
+    rows = drain(d)
+    if "--shutdown-timeout" in flags:
+        d.extra = ["--shutdown-timeout", "60"]
+        d.start()
+        d.wait_healthy()
+        rows += drain(d)
+    save("drain", rows)
+    save("drain_logs", {p.name: p.read_text() for p in pathlib.Path("/tmp").glob("d-*.log")})
+
+
 @app.function(gpu="H100!:2", image=image, volumes={"/hf": hf_cache, "/results": results}, timeout=3 * 3600,
               single_use_containers=True, cpu=16.0, memory=131072)
 def run():
@@ -259,23 +323,23 @@ def run():
 
 
 @app.local_entrypoint()
-def main(collect: bool = False):
+def main(collect: bool = False, drain: bool = False):
     if not collect:
         # With --detach, the run carries on after this client exits.
-        print("started", run.spawn().object_id)
+        print("started", (run_drain if drain else run).spawn().object_id)
         return
     saved = {e.path.removesuffix(".json"): json.loads(b"".join(results.read_file(e.path))) for e in results.listdir("/")}
     logdir = pathlib.Path("failover_logs")
     logdir.mkdir(exist_ok=True)
-    for name, text in saved.get("logs", {}).items():
+    for name, text in {**saved.get("logs", {}), **saved.get("drain_logs", {})}.items():
         (logdir / name).write_text(text)
-    for name, rows in (("single", saved.get("single", [])), ("load", saved.get("load", []))):
+    for name, rows in (("single", saved.get("single", [])), ("load", saved.get("load", [])), ("drain", saved.get("drain", []))):
         if rows:
             fields = sorted({k for r in rows for k in r}, key=lambda k: (k not in ("strategy", "user", "role"), k))
             with open(f"results_failover_{name}.csv", "w", newline="") as f:
                 w = csv.DictWriter(f, fieldnames=fields)
                 w.writeheader()
                 w.writerows(rows)
-    print(json.dumps({k: v for k, v in saved.items() if k in ("startup", "hang")}, indent=2))
+    print(json.dumps({k: v for k, v in saved.items() if k in ("startup", "hang", "drain_help")}, indent=2))
     for r in saved.get("single", []):
         print(json.dumps(r))
