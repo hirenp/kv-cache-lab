@@ -766,3 +766,24 @@ For prompts of about 1k, 8.7k and 28k tokens, 512 output tokens (`ignore_eos`, g
 ## V8.6 Non-goals
 
 Real hardware faults (XIDs, NVLink or NIC errors), disaggregated prefill/decode (NIXL doesn't run on Modal), multi-node failures, and health-check tuning beyond showing what a hang looks like.
+
+---
+
+# KV Cache Lab V9: Inference in production, part 4 (planned shutdown during a rollout)
+
+## V9.1 Scope
+
+A Kubernetes rolling update sends SIGTERM to each old pod's main process and SIGKILL when the grace period ends. What happens to answers still streaming when vLLM gets that SIGTERM? One vLLM 0.30 replica of Qwen2.5-7B-Instruct on one Modal H100 (`"H100!"`), added to `kv_failover.py` as `--drain`.
+
+## V9.2 Runs
+
+1. Default flags: 5 users stream 2,048-token answers (`ignore_eos`); 3 s in, SIGTERM goes to the `vllm serve` process only. Wait up to 90 s for it to exit, then SIGKILL, as a grace period would.
+2. The same with `--shutdown-timeout 60`, if vLLM 0.30 lists that flag in `vllm serve --help`. Record the help lines that mention shutdown either way.
+
+## V9.3 Per user
+
+Tokens received before and after SIGTERM, whether the answer completed (`[DONE]` arrived) or how it ended, and when. Per run: time until the process exited, whether the SIGKILL was needed, and what a `/health` request gets 0.5 s after SIGTERM.
+
+## V9.4 Output
+
+`results_failover_drain.csv`, and the vLLM logs as `failover_logs/d-*.log`.

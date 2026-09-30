@@ -1,0 +1,11 @@
+user,completed,ended_after_sigterm_s,error,health_during_shutdown,process_exit_s,shutdown_flags,sigkilled_at_grace,tokens,tokens_after_sigterm
+0,False,90.54,StreamEndedWithoutDone,URLError: <urlopen error [Errno 111] Connection refused>,90.5,(default),True,423,1
+1,False,90.54,StreamEndedWithoutDone,URLError: <urlopen error [Errno 111] Connection refused>,90.5,(default),True,422,1
+2,False,90.54,StreamEndedWithoutDone,URLError: <urlopen error [Errno 111] Connection refused>,90.5,(default),True,422,0
+3,False,90.54,StreamEndedWithoutDone,URLError: <urlopen error [Errno 111] Connection refused>,90.5,(default),True,422,1
+4,False,90.54,StreamEndedWithoutDone,URLError: <urlopen error [Errno 111] Connection refused>,90.5,(default),True,422,1
+0,True,9.94,,health answered,13.6,--shutdown-timeout 60,False,2048,1585
+1,True,9.95,,health answered,13.6,--shutdown-timeout 60,False,2048,1586
+2,True,9.95,,health answered,13.6,--shutdown-timeout 60,False,2048,1586
+3,True,9.95,,health answered,13.6,--shutdown-timeout 60,False,2048,1586
+4,True,9.95,,health answered,13.6,--shutdown-timeout 60,False,2048,1586
