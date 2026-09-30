@@ -735,3 +735,34 @@ On `7b-warm` (prefix caching on, the vLLM default): send the same ~30k-token pro
 ## V7.6 Non-goals
 
 Node provisioning and container image pull (Modal loads images lazily from its own store, so its timings don't match a plain `docker pull`), model streamers, GPU snapshots, and batched serving throughput.
+
+---
+
+# KV Cache Lab V8: Inference in production, part 3 (when a worker dies)
+
+## V8.1 Scope
+
+Two vLLM 0.30 replicas of Qwen2.5-7B-Instruct, one per GPU, on one Modal machine with two H100s (pinned with `"H100!:2"`). The script is the client and the router. Replica A is made to fail partway through a streamed answer; replica B takes over. Prefix caching is off on both, so B never has the prompt cached from an earlier attempt.
+
+Failure stand-ins: SIGKILL of A's process group (a GPU or node that dies outright; its sockets close) and SIGSTOP (a hung GPU; the process freezes with its sockets open). Neither reproduces real hardware errors; both remove a worker and the KV caches it holds.
+
+## V8.2 Recovery strategies
+
+- `restart`: send the original prompt to B and generate the whole answer again.
+- `continue`: send the prompt plus the tokens A already streamed, as token IDs (`return_token_ids`), and generate only the rest (what Dynamo calls request migration). Falls back to text if vLLM returns no IDs; each row records which.
+
+## V8.3 Experiment 1: one request, no other traffic
+
+For prompts of about 1k, 8.7k and 28k tokens, 512 output tokens (`ignore_eos`, greedy): a reference run on B, then a run on A killed after 128 tokens, then both strategies on B. Record time from the kill to the client's error, time from the error to the first new token, time to finish, and whether the recovered answer matches the reference. For the 1k prompt, also SIGSTOP A and record how the stream and `/health` behave until a client timeout fires.
+
+## V8.4 Experiment 2: under load
+
+8 streaming users per replica (2k-token prompts, 1,024 output tokens). After 20 s, kill A; its users move to B with one strategy (a run per strategy, restarting A between). Record each moved user's gap (last token before the failure to first token after) and B's own users' time between tokens before and after the failure.
+
+## V8.5 Output
+
+`results_failover_single.csv`, `results_failover_load.csv`, and the vLLM logs in `failover_logs/`.
+
+## V8.6 Non-goals
+
+Real hardware faults (XIDs, NVLink or NIC errors), disaggregated prefill/decode (NIXL doesn't run on Modal), multi-node failures, and health-check tuning beyond showing what a hang looks like.

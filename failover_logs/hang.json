@@ -1,0 +1,1 @@
+{"tokens_before_freeze": 128, "client_error": "TimeoutError", "client_error_after_s": 10.0, "client_read_timeout_s": 10, "health_check": "TimeoutError", "health_check_after_s": 5.0, "health_timeout_s": 5, "a_restart_s": 59.1}
