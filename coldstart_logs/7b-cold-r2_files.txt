@@ -1,0 +1,9 @@
+   37.6 s ..    37.6 s       1 files        0.0 MB  /root/.cache/vllm/modelinfos
+   41.1 s ..   191.5 s       6 files        0.0 MB  /tmp
+   54.5 s ..    54.5 s       1 files        0.0 MB  /root/.config/vllm
+   55.5 s ..    55.5 s       1 files        0.0 MB  /root/.humming/tmp/lock
+   73.5 s ..    82.5 s       2 files        0.6 MB  /root/.cache/vllm/torch_compile_cache/1660ce5082
+   76.5 s ..    76.5 s       1 files        0.1 MB  /root/.triton/cache/KUUFFY2WZQZWRIRN2CVNQIB5FHIFONI4UCQIU2SIASOWQRIQL4EA
+   76.5 s ..   189.3 s     373 files       23.0 MB  /root/.cache/vllm/torch_compile_cache/torch_aot_compile
+   94.7 s ..    94.7 s       1 files        0.0 MB  /root/.cache/vllm/flashinfer_autotune_cache/0.6.18.post1
+   94.7 s ..   173.4 s       9 files        6.4 MB  /root/.cache/flashinfer/0.6.18.post1/90a
