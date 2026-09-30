@@ -701,3 +701,37 @@ Per mode and L: A's median gap, A's worst gap, the number of A's gaps above 2× 
 ## V5.6 Non-goals
 
 Batched decode of many users, B decoding after its first token, true concurrent execution of prefill and decode on one GPU (streams, MPS, time-slicing), vLLM/SGLang, and cross-machine transfer.
+
+---
+
+# KV Cache Lab V7: Inference in production, part 2 (why a new replica takes minutes)
+
+## V7.1 Scope
+
+Time a vLLM server from process start to its first useful answer, split into phases, on Modal H100s. vLLM 0.30, CUDA 13 devel image (vLLM compiles some kernels at startup and needs nvcc). Every start runs in a fresh container (`max_inputs=1`), so no compile or kernel cache survives from an earlier call.
+
+## V7.2 Runs
+
+1. `7b-cold`: Qwen2.5-7B-Instruct, one H100, empty caches.
+2. `7b-warm`: second start in the same container, caches from run 1 kept.
+3. `7b-eager-cold`: `--enforce-eager` (no torch.compile, no CUDA graphs), fresh container.
+4. `32b-cold` and `32b-warm`: Qwen2.5-32B-Instruct, two H100s, tensor parallel 2.
+5. `32b-download`: the 32B weights from Hugging Face into the Modal volume, CPU-only container, timed.
+
+## V7.3 Per start
+
+Time to /health from process start; phase durations and timestamps parsed from vLLM's log (weight load, model load, torch.compile, CUDA graph capture, engine init, server start); time to first token for a short prompt (streamed, first chunk); decode tokens/s for 256 output tokens at batch size 1. Save the full log.
+
+After each cold start, list every file written under /root, /tmp and site-packages since the process started, grouped by directory with total size and first/last write time relative to process start. This explains any period in which the log is quiet.
+
+## V7.4 Empty prefix cache
+
+On `7b-warm` (prefix caching on, the vLLM default): send the same ~30k-token prompt twice and record time to first token for each. The first is what a new replica pays for every prompt; the second is a cache hit.
+
+## V7.5 Output
+
+`results_coldstart.csv` (one row per start), `coldstart_logs/<run>.log`, `coldstart_logs/<run>_files.txt`.
+
+## V7.6 Non-goals
+
+Node provisioning and container image pull (Modal loads images lazily from its own store, so its timings don't match a plain `docker pull`), model streamers, GPU snapshots, and batched serving throughput.

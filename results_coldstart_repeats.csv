@@ -1,0 +1,16 @@
+run,args,compile_s,decode_tok_s,engine_init_s,first_token_s,gpu,graph_capture_s,health_s,kv_cache_gib,long_prompt_first_s,long_prompt_repeat_s,model,model_load_s,rep,start_epoch,weights_s
+32b-cold,--tensor-parallel-size 2,80.38,70.3,303.18,0.536,NVIDIA H100 80GB HBM3,239.0,469.0,38.98,,,Qwen2.5-32B-Instruct,31.607952,1,1790748704.7,29.03
+32b-warm,--tensor-parallel-size 2,1.61,70.3,52.8,0.082,NVIDIA H100 80GB HBM3,84.0,169.0,39.0,,,Qwen2.5-32B-Instruct,17.308637,1,1790749190.4,14.66
+7b-cold,,23.49,163.9,120.81,0.393,NVIDIA H100 80GB HBM3,11.0,201.0,54.74,,,Qwen2.5-7B-Instruct,10.760158,1,1790748241.5,7.43
+7b-eager-cold,--enforce-eager,,91.7,87.2,0.387,NVIDIA H100 80GB HBM3,,141.4,56.56,,,Qwen2.5-7B-Instruct,8.670339,1,1790748541.4,6.24
+7b-warm,,0.27,163.9,16.44,0.057,NVIDIA H100 80GB HBM3,10.0,67.7,55.79,1.022,0.079,Qwen2.5-7B-Instruct,5.078348,1,1790748454.6,2.21
+32b-cold,--tensor-parallel-size 2,48.04,70.6,353.7,0.439,NVIDIA H100 80GB HBM3,428.0,471.0,38.98,,,Qwen2.5-32B-Instruct,24.374713,2,1790749878.5,21.64
+32b-warm,--tensor-parallel-size 2,1.22,70.6,238.42,0.063,NVIDIA H100 80GB HBM3,458.0,343.0,39.0,,,Qwen2.5-32B-Instruct,12.753804,2,1790750363.9,8.05
+7b-cold,,19.21,168.1,117.44,0.364,NVIDIA H100 80GB HBM3,12.0,189.0,54.74,,,Qwen2.5-7B-Instruct,11.994086,2,1790749375.1,6.63
+7b-eager-cold,--enforce-eager,,55.1,84.37,0.41,NVIDIA H100 80GB HBM3,,163.0,56.56,,,Qwen2.5-7B-Instruct,10.4566,2,1790749660.2,7.44
+7b-warm,,0.26,168.1,18.75,0.051,NVIDIA H100 80GB HBM3,13.0,67.7,55.79,1.027,0.087,Qwen2.5-7B-Instruct,7.396187,2,1790749576.0,4.05
+32b-cold,--tensor-parallel-size 2,45.04,70.5,215.25,0.376,NVIDIA H100 80GB HBM3,172.0,309.7,38.98,,,Qwen2.5-32B-Instruct,23.885579,3,1790751222.9,22.17
+32b-warm,--tensor-parallel-size 2,0.46,70.5,32.71,0.054,NVIDIA H100 80GB HBM3,50.0,96.7,39.0,,,Qwen2.5-32B-Instruct,9.242838,3,1790751546.4,7.74
+7b-cold,,23.52,162.4,122.19,0.397,NVIDIA H100 80GB HBM3,11.0,204.1,54.74,,,Qwen2.5-7B-Instruct,10.395042,3,1790750721.8,7.33
+7b-eager-cold,--enforce-eager,,54.6,87.17,0.42,NVIDIA H100 80GB HBM3,,169.6,56.56,,,Qwen2.5-7B-Instruct,10.470939,3,1790751028.7,7.41
+7b-warm,,0.29,162.4,19.92,0.379,NVIDIA H100 80GB HBM3,10.0,74.7,55.79,1.036,0.079,Qwen2.5-7B-Instruct,5.68849,3,1790750938.3,2.21

@@ -1,0 +1,7 @@
+run,args,compile_s,decode_tok_s,download_gb,download_s,engine_init_s,first_token_s,graph_capture_s,health_s,kv_cache_gib,long_prompt_first_s,long_prompt_repeat_s,model,model_load_s,start_epoch,weights_s
+32b-download,,,,65.5,143.2,,,,,,,,Qwen2.5-32B-Instruct,,,
+7b-cold,,20.46,168.3,,,119.9,0.381,13.0,199.5,54.74,,,Qwen2.5-7B-Instruct,17.983354,1790731084.7,14.08
+7b-warm,,0.24,168.4,,,20.06,0.36,11.0,67.7,55.79,1.027,0.087,Qwen2.5-7B-Instruct,9.065226,1790731295.6,4.08
+7b-eager-cold,--enforce-eager,,88.4,,,87.43,0.395,,177.5,56.56,,,Qwen2.5-7B-Instruct,19.239189,1790731086.9,14.13
+32b-cold,--tensor-parallel-size 2,64.6,70.6,,,237.9,0.408,180.0,390.8,38.98,,,Qwen2.5-32B-Instruct,48.325965,1790731241.8,45.68
+32b-warm,--tensor-parallel-size 2,0.48,70.5,,,34.48,0.066,54.0,108.8,39.0,,,Qwen2.5-32B-Instruct,8.946428,1790731646.1,7.11
