@@ -58,29 +58,39 @@ def serve_and_measure(name, model, args, prefix_test=False):
     log_path = f"/tmp/{name}.log"
     gpu = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], capture_output=True, text=True).stdout.split("\n")[0]
     t0 = time.time()
-    proc = subprocess.Popen(["vllm", "serve", model, "--port", "8000", "--max-model-len", "32768", *args],
-                            env={**os.environ, "HF_HOME": "/hf"}, stdout=open(log_path, "w"), stderr=subprocess.STDOUT)
+    with open(log_path, "w") as log:  # the server keeps its own copy of the file handle
+        proc = subprocess.Popen(["vllm", "serve", model, "--port", "8000", "--max-model-len", "32768", *args],
+                                env={**os.environ, "HF_HOME": "/hf"}, stdout=log, stderr=subprocess.STDOUT,
+                                start_new_session=True)
     row = {"run": name, "model": model.split("/")[1], "args": " ".join(args), "gpu": gpu, "start_epoch": round(t0, 1)}
-    while time.time() - t0 < 1800 and proc.poll() is None:
+    try:
+        while time.time() - t0 < 1800 and proc.poll() is None:
+            try:
+                urllib.request.urlopen("http://localhost:8000/health", timeout=2)
+                row["health_s"] = round(time.time() - t0, 1)
+                break
+            except Exception:
+                time.sleep(0.5)
+        if "health_s" in row:
+            row["first_token_s"] = first_token("The capital of France is")
+            t = time.time()
+            usage = json.loads(post({"prompt": "Write a long story about a lighthouse.", "max_tokens": 256, "ignore_eos": True}).read())["usage"]
+            row["decode_tok_s"] = round(usage["completion_tokens"] / (time.time() - t), 1)
+            if prefix_test:
+                # The same ~30k-token prompt twice: the first computes it all, the second hits the prefix cache.
+                prompt = "The quick brown fox jumps over the lazy dog. " * 3000
+                row["long_prompt_first_s"] = first_token(prompt)
+                row["long_prompt_repeat_s"] = first_token(prompt)
+    except Exception as e:  # keep the log and the timings measured so far
+        row["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        proc.terminate()
         try:
-            urllib.request.urlopen("http://localhost:8000/health", timeout=2)
-            row["health_s"] = round(time.time() - t0, 1)
-            break
-        except Exception:
-            time.sleep(0.5)
-    if "health_s" in row:
-        row["first_token_s"] = first_token("The capital of France is")
-        t = time.time()
-        usage = json.loads(post({"prompt": "Write a long story about a lighthouse.", "max_tokens": 256, "ignore_eos": True}).read())["usage"]
-        row["decode_tok_s"] = round(usage["completion_tokens"] / (time.time() - t), 1)
-        if prefix_test:
-            # The same ~30k-token prompt twice: the first computes it all, the second hits the prefix cache.
-            prompt = "The quick brown fox jumps over the lazy dog. " * 3000
-            row["long_prompt_first_s"] = first_token(prompt)
-            row["long_prompt_repeat_s"] = first_token(prompt)
-    proc.terminate()
-    proc.wait(timeout=120)
-    time.sleep(5)
+            proc.wait(timeout=120)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, 9)
+            proc.wait()
+        time.sleep(5)
     return row, open(log_path).read()
 
 
@@ -176,7 +186,11 @@ def run_all(first_rep: int, repeats: int, download_weights: bool):
         results.commit()
     for rep in range(first_rep, first_rep + repeats):
         for fn, model, args, warm in jobs:
-            rows, logs = fn.remote(model, args, warm, rep)
+            try:
+                rows, logs = fn.remote(model, args, warm, rep)
+            except Exception as e:  # one failed start shouldn't lose the rest of the run
+                print(f"rep {rep} {model} {args} failed: {e!r}")
+                continue
             name = f"{rows[0]['run']}-r{rep}.json"
             pathlib.Path(f"/results/{name}").write_text(json.dumps({"rows": rows, "logs": logs}))
             results.commit()

@@ -22,7 +22,7 @@ from kv_offload import cache_tensors
 
 A_PROMPT = 1024
 A_STEPS = 100
-ARRIVAL = 20  # B arrives just before A's 20th decode step
+ARRIVAL = 20  # B arrives after A's 20th decode step
 CHUNKS = [512, 2048]
 
 
@@ -60,8 +60,9 @@ def run(mode, models, a_prompt, b_prompt, worker=None):
                 sync(PREFILL_GPU)
                 b["ttft_ms"] = (time.perf_counter() - arrival) * 1000
                 b["first_token"] = b_logits.argmax().item()
-            elif mode == "disaggregated-thread":
-                thread = threading.Thread(target=prefill_elsewhere, args=(models, b_prompt, arrival, b))
+            elif mode.startswith("disaggregated-thread"):
+                copy = mode == "disaggregated-thread"
+                thread = threading.Thread(target=prefill_elsewhere, args=(models, b_prompt, arrival, b, copy))
                 thread.start()
             elif mode == "disaggregated-process":
                 worker[0].put(b_prompt.cpu())
@@ -88,7 +89,7 @@ def run(mode, models, a_prompt, b_prompt, worker=None):
         thread.join()
     if mode == "disaggregated-process" and b_prompt is not None:
         # perf_counter is CLOCK_MONOTONIC on Linux, so the worker's timestamp is comparable.
-        finished, b["first_token"] = worker[1].get()
+        finished, b["first_token"] = worker[1].get(timeout=600)
         b["ttft_ms"] = (finished - arrival) * 1000
     return gaps, tokens, b
 
@@ -106,16 +107,20 @@ def prefill_worker(requests, results):
             results.put((time.perf_counter(), logits.argmax().item()))
 
 
-def prefill_elsewhere(models, b_prompt, arrival, b):
+def prefill_elsewhere(models, b_prompt, arrival, b, copy):
     # "disaggregated-thread": B's prefill on GPU 0 in a thread of the same process,
-    # then its cache copied to GPU 1. A's loop on GPU 1 doesn't wait for it on the
-    # GPU, but both threads share one Python interpreter lock.
+    # then its cache copied to GPU 1. The copy is queued on GPU 1's default stream,
+    # which A's decode steps also use, and it can't start until B's prefill on GPU 0
+    # finishes, so A's next step on GPU 1 waits behind it.
+    # "disaggregated-thread-nocopy": the same without the copy, which isolates the
+    # effect of sharing one Python process from the effect of the copy.
     # inference_mode is per thread, so it has to be entered again here.
     with torch.inference_mode():
         b_logits, b_cache = prefill(models[PREFILL_GPU], b_prompt)
-        dst = [t.to(DECODE_GPU) for t in cache_tensors(b_cache)]
+        dst = [t.to(DECODE_GPU) for t in cache_tensors(b_cache)] if copy else []
         sync(PREFILL_GPU)
-        sync(DECODE_GPU)
+        if copy:
+            sync(DECODE_GPU)
     b["ttft_ms"] = (time.perf_counter() - arrival) * 1000
     b["first_token"] = b_logits.argmax().item()
     del dst
@@ -138,11 +143,13 @@ def main():
     generator = torch.Generator().manual_seed(0)
     vocab = models[PREFILL_GPU].config.vocab_size
     a_prompt = torch.randint(0, vocab, (1, A_PROMPT), generator=generator)
-    modes = ["colocated"] + [f"chunked-{c}" for c in CHUNKS] + ["disaggregated-thread", "disaggregated-process"]
+    modes = (["colocated"] + [f"chunked-{c}" for c in CHUNKS]
+             + ["disaggregated-thread", "disaggregated-thread-nocopy", "disaggregated-process"])
 
     context = mp.get_context("spawn")
     worker = (context.Queue(), context.Queue())
-    process = context.Process(target=prefill_worker, args=worker)
+    # daemon: if this process fails, the worker is killed with it instead of holding the GPUs.
+    process = context.Process(target=prefill_worker, args=worker, daemon=True)
     process.start()
     rows, summaries = [], []
 
@@ -153,7 +160,7 @@ def main():
         run("disaggregated-thread", models, a_prompt, None)
         for n in (max(lengths), 4096):
             worker[0].put(torch.randint(0, vocab, (1, n), generator=generator))
-            worker[1].get()
+            worker[1].get(timeout=600)
         warm_b = torch.randint(0, vocab, (1, 4096), generator=generator).to(PREFILL_GPU)
         for c in CHUNKS:
             run(f"chunked-{c}", models, a_prompt, warm_b)
@@ -171,16 +178,16 @@ def main():
                 rows += [{"mode": mode, "b_tokens": length, "step": i, "gap_ms": g} for i, g in enumerate(gaps)]
             torch.cuda.empty_cache()
     worker[0].put(None)
-    process.join()
+    process.join(timeout=60)
 
     banner("USER A'S GAPS BETWEEN TOKENS, AND REQUEST B'S TIME TO FIRST TOKEN")
-    print(f"  {'mode':<21} {'B tokens':>8}  {'A median':>8}  {'A worst':>8}  {'A gaps > 2x':>11}  {'B TTFT':>8}"
+    print(f"  {'mode':<28} {'B tokens':>8}  {'A median':>8}  {'A worst':>8}  {'A gaps > 2x':>11}  {'B TTFT':>8}"
           f"  {'A same':>6}  {'B same':>6}")
     baseline = statistics.median(alone)
     for mode, length, gaps, b, a_same, b_same in summaries:
         slow = sum(g > 2 * baseline for g in gaps)
         ttft = f"{b['ttft_ms']:.0f} ms" if b else "-"
-        print(f"  {mode:<21} {length:>8}  {statistics.median(gaps):>6.1f}ms  {max(gaps):>6.0f}ms  {slow:>11}  {ttft:>8}"
+        print(f"  {mode:<28} {length:>8}  {statistics.median(gaps):>6.1f}ms  {max(gaps):>6.0f}ms  {slow:>11}  {ttft:>8}"
               f"  {str(a_same):>6}  {str(b_same) if b else '-':>6}")
     print(f"  ('A gaps > 2x' counts gaps over twice A's median gap when alone, {baseline:.1f} ms. 'A same': A's")
     print("   tokens match A decoding alone. 'B same': B's first token matches one unchunked prefill.)")
