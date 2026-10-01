@@ -13,7 +13,7 @@ import shlex
 
 import modal
 
-GPU = "H100"
+GPU = "H100!"  # "!" pins the type; plain "H100" can be served by an H200
 LAB_FILES = ["kv_bandwidth.py", "kv_offload.py", "kv_disagg.py", "kv_interference.py", "kv_lab.py", "hardware_info.py"]
 
 image = modal.Image.debian_slim(python_version="3.11").pip_install_from_requirements("requirements.txt")
@@ -51,19 +51,26 @@ def execute(script, args):
     import os
     import subprocess
 
-    command = ["python", script, *shlex.split(args), "--out", "/tmp/results.csv"]
+    csv_path = pathlib.Path("/tmp/results.csv")
+    # A warm container can be reused for the next call, so clear the last run's CSV first.
+    csv_path.unlink(missing_ok=True)
+    command = ["python", script, *shlex.split(args), "--out", str(csv_path)]
     if script == "kv_bandwidth.py":
         command[2:2] = ["--device", "cuda"]
     result = subprocess.run(
         command, cwd="/lab", env={**os.environ, "HF_HOME": "/hf"}, capture_output=True, text=True
     )
     hf_cache.commit()
-    csv_path = pathlib.Path("/tmp/results.csv")
-    return result.stdout + result.stderr, csv_path.read_text() if csv_path.exists() else ""
+    report = result.stdout + result.stderr
+    if result.returncode != 0:
+        report += f"\n{script} exited with code {result.returncode}\n"
+    return report, csv_path.read_text() if csv_path.exists() else ""
 
 
 @app.local_entrypoint()
-def main(script: str = "kv_bandwidth.py", args: str = "--cache all", out: str = "results_h100.csv"):
+def main(script: str = "kv_bandwidth.py", args: str = "", out: str = "results_h100.csv"):
+    if script == "kv_bandwidth.py" and "--cache" not in args:
+        args += " --cache all"
     runner = run_two_gpus if script in TWO_GPU_SCRIPTS else run
     report, csv_text = runner.remote(script, args)
     print(report)

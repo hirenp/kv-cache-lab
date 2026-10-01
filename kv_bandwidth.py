@@ -242,6 +242,10 @@ def main():
     kinds = KIND_SETS.get(args.cache, [args.cache])
 
     print_hardware_info(device)
+    if device == "cuda":
+        # cuDNN attention has a large cost per new shape on H100 (see SPEC V3.6), and this
+        # sweep changes shape every step; the other GPU scripts turn it off the same way.
+        torch.backends.cuda.enable_cudnn_sdp(False)
     if device == "mps" and not torch.backends.mps.is_available():
         raise SystemExit("ERROR: MPS is not available on this machine. Re-run with --device cpu.")
     if device == "cuda" and not torch.cuda.is_available():
@@ -318,7 +322,7 @@ def main():
         effective_gbps = 1 / slope / 1e6  # slope is ms per byte
         print(f"{kind}:")
         print(f"  empty-cache cost (intercept): {intercept:.2f} ms")
-        print(f"  effective bandwidth (slope):  {effective_gbps:.0f} GB/s of KV per extra ms")
+        print(f"  effective bandwidth (slope):  {effective_gbps:.0f} GB/s")
         print(f"  passes over the cache/step:   {bandwidth / effective_gbps:.1f}  (measured bandwidth / effective)")
         print(f"  fit R^2:                      {r2:.4f}")
     print()

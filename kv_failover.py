@@ -45,13 +45,14 @@ class Replica:
         import os
         import subprocess
         self.starts += 1
-        log = open(f"/tmp/{self.name}-{self.starts}.log", "w")
         # Prefix caching is off, so a replica never has a prompt cached from an earlier attempt.
-        self.proc = subprocess.Popen(
-            ["vllm", "serve", MODEL, "--port", str(self.port), "--max-model-len", "32768", "--no-enable-prefix-caching",
-             *self.extra],
-            env={**os.environ, "HF_HOME": "/hf", "CUDA_VISIBLE_DEVICES": str(self.gpu)},
-            stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        # The server keeps its own copy of the log file handle.
+        with open(f"/tmp/{self.name}-{self.starts}.log", "w") as log:
+            self.proc = subprocess.Popen(
+                ["vllm", "serve", MODEL, "--port", str(self.port), "--max-model-len", "32768",
+                 "--no-enable-prefix-caching", *self.extra],
+                env={**os.environ, "HF_HOME": "/hf", "CUDA_VISIBLE_DEVICES": str(self.gpu)},
+                stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
 
     def wait_healthy(self):
         import urllib.request
@@ -153,6 +154,8 @@ def single_request(a, b):
                 killed["t"] = time.time()
                 a.signal(signal.SIGKILL)
         fail = stream(a.port, prompt, OUTPUT_TOKENS, on_token=kill_at)
+        if not killed:
+            raise RuntimeError(f"A's stream ended after {len(fail['times'])} tokens, before the kill at {FAIL_AFTER}")
         base = {"prompt_tokens": prompt_tokens, "tokens_before_failure": len(fail["times"]),
                 "error": fail["error"], "detect_s": round(fail["error_time"] - killed["t"], 3),
                 "reference_ttft_s": round(ref["times"][0] - ref["start"], 3), "reference_total_s": round(ref["times"][-1] - ref["start"], 2)}

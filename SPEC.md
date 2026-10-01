@@ -688,7 +688,7 @@ Interference between prefill and decode on a shared GPU (a later post), attentio
 3. **Disaggregated, thread:** A decodes on GPU 1. B's prefill runs on GPU 0 in a separate thread of the same process, then B's cache is copied to GPU 1 (bulk, as V4). A's decode loop does not wait for B on the GPU, but both threads share one Python interpreter lock.
 4. **Disaggregated, process:** as above, but B's prefill runs in a separate worker process with its own copy of the model on GPU 0 (spawned with `torch.multiprocessing`, fed prompts over a queue). B's cache stays on GPU 0; V4 measures the copy. B's time to first token uses the worker's `perf_counter` timestamp, which is comparable across processes on Linux (CLOCK_MONOTONIC).
 
-Finding from the first full run: the thread version stalled A for most of B's prefill (1,161 ms at 32k) even though the GPUs are separate; the process version did not (worst gap 26 ms). Keep both modes so the difference is reproducible.
+Finding from the first full run: the thread version stalled A for most of B's prefill (1,161 ms at 32k) even though the GPUs are separate; the process version did not (worst gap 26 ms). Keep both modes so the difference is reproducible. Follow-up (2026-10-01): a `disaggregated-thread-nocopy` mode, the same thread without the copy, had a worst gap of 50 ms at 32k (`results_interference_threadcheck.csv`). The stall came from the copy to GPU 1, queued on the stream A's decode uses and waiting for B's prefill, not from the shared interpreter lock.
 
 ## V5.4 Correctness
 
@@ -708,7 +708,7 @@ Batched decode of many users, B decoding after its first token, true concurrent 
 
 ## V7.1 Scope
 
-Time a vLLM server from process start to its first useful answer, split into phases, on Modal H100s. vLLM 0.30, CUDA 13 devel image (vLLM compiles some kernels at startup and needs nvcc). Every start runs in a fresh container (`max_inputs=1`), so no compile or kernel cache survives from an earlier call.
+Time a vLLM server from process start to its first useful answer, split into phases, on Modal H100s. vLLM 0.30, CUDA 13 devel image (vLLM compiles some kernels at startup and needs nvcc). Every start runs in a fresh container (`single_use_containers=True`), so no compile or kernel cache survives from an earlier call.
 
 ## V7.2 Runs
 
@@ -730,7 +730,7 @@ On `7b-warm` (prefix caching on, the vLLM default): send the same ~30k-token pro
 
 ## V7.5 Output
 
-`results_coldstart.csv` (one row per start), `coldstart_logs/<run>.log`, `coldstart_logs/<run>_files.txt`.
+`results_coldstart.csv` (round 0, from an earlier version of the script that ran the 7B starts in parallel), `results_coldstart_repeats.csv` (rounds 1-3, one start at a time), `coldstart_logs/<run>-r<rep>.log`, `coldstart_logs/<run>-r<rep>_files.txt`.
 
 ## V7.6 Non-goals
 
@@ -757,7 +757,7 @@ For prompts of about 1k, 8.7k and 28k tokens, 512 output tokens (`ignore_eos`, g
 
 ## V8.4 Experiment 2: under load
 
-8 streaming users per replica (2k-token prompts, 1,024 output tokens). After 20 s, kill A; its users move to B with one strategy (a run per strategy, restarting A between). Record each moved user's gap (last token before the failure to first token after) and B's own users' time between tokens before and after the failure.
+8 streaming users per replica (prompts of about 2.6k tokens, 2,048 output tokens). After 6 s, kill A; its users move to B with one strategy (a run per strategy, restarting A between). Record each moved user's gap (last token before the failure to first token after) and B's own users' time between tokens before and after the failure.
 
 ## V8.5 Output
 
