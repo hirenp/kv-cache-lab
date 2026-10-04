@@ -809,3 +809,24 @@ Each run twice.
 
 Per run: TTFT, TPOT and ITL percentiles from `vllm bench serve`, plus p99.9 and max ITL from the per-request gaps. `results_workload_shapes.csv` and `results_workload_interference.csv`, with versions and the second client's progress log in `results_workload_interference_notes.txt`.
 
+---
+
+# KV Cache Lab V11: FP4 vs FP16
+
+## V11.1 Scope
+
+What does storing weights in FP4 cost in error, and what does it buy in memory and decode speed? Model: Qwen3-8B (BF16), and RedHatAI/Qwen3-8B-NVFP4 (NVFP4 weights and activations, embeddings and lm_head kept in BF16).
+
+## V11.2 Rounding error (`kv_fp4_error.py`, laptop CPU)
+
+Download only the safetensors shard holding `model.layers.18.mlp.down_proj.weight`. Round that matrix, and every other 2-D linear weight in the shard, four ways: straight to the nearest E2M1 value, one scale per matrix (max maps to 6), MXFP4 (one power-of-two scale per 32 weights), and NVFP4 (one E4M3 scale per 16 weights plus one FP32 scale per matrix). Per matrix: median, p99 and max of |w|, the share of nonzero weights that become 0, and mean |q - w| / mean |w|. Output `results_fp4_error.csv`.
+
+## V11.3 Serving (`kv_fp4_serve.py`, Modal B200)
+
+vLLM 0.30, one server at a time, prefix caching off, `--max-model-len 16384`. For each checkpoint:
+
+1. Weight memory from vLLM's "Model loading took" log line.
+2. `vllm bench serve`, random dataset, `--ignore-eos`, 512 output tokens: 1 user with 256-token prompts, 16 users with 256-token prompts, 16 users with 8,192-token prompts. Each twice, after a discarded warmup.
+3. All 1,319 GSM8K test questions through `/v1/chat/completions`, temperature 0, thinking off, last number after "answer is" compared to the reference. For FP4, also the share of answers identical to the BF16 run.
+
+Output `results_fp4_serve.csv`, `results_fp4_answers.jsonl`, `results_fp4_serve_notes.txt`.
