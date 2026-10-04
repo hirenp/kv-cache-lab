@@ -787,3 +787,25 @@ Tokens received before and after SIGTERM, whether the answer completed (`[DONE]`
 ## V9.4 Output
 
 `results_failover_drain.csv`, and the vLLM logs as `failover_logs/d-*.log`.
+
+# KV Cache Lab V10: Inference in production, part 5 (workload types)
+
+## V10.1 Scope
+
+How much do long prompts slow down other requests' decoding, and which latency numbers show it? One vLLM 0.30 server with Qwen2.5-7B-Instruct on one Modal H100, prefix caching off, loaded by `vllm bench serve` (random dataset, `--ignore-eos`, concurrency 16) from the same container. In `kv_workload.py`.
+
+## V10.2 Server configs
+
+Chunked prefill off (`--no-enable-chunked-prefill`, 16,384-token budget), and on with token budgets of 2,048, 8,192 (the vLLM 0.30 default) and 512.
+
+## V10.3 Runs
+
+1. Shapes, each alone: 8,192/256, 1,024/1,024 and 256/4,096 input/output tokens (off and 2,048 only).
+2. Interference: a 256/1,024 decode stream alone, then again while a second client sends 8,192/16 requests at 1 per second (burstiness 100). The measured stream starts once the server has prefilled the first 8k prompt.
+
+Each run twice.
+
+## V10.4 Output
+
+Per run: TTFT, TPOT and ITL percentiles from `vllm bench serve`, plus p99.9 and max ITL from the per-request gaps. `results_workload_shapes.csv` and `results_workload_interference.csv`, with versions and the second client's progress log in `results_workload_interference_notes.txt`.
+
