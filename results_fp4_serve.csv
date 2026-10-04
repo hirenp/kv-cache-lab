@@ -1,0 +1,15 @@
+checkpoint,model,case,run,users,input_len,output_len,completed,weight_gib,mean_tpot_ms,tokens_per_s_per_user,output_tokens_per_s,mean_ttft_ms,gsm8k_correct,gsm8k_pct,same_answer_as_16bit_pct
+16-bit,Qwen/Qwen3-8B,1 user,1,1,256,512,8,15.27,4.062,246.2,243.1,30.0,,,
+16-bit,Qwen/Qwen3-8B,"16 users, short",1,16,256,512,64,15.27,7.249,138.0,1980.5,422.5,,,
+16-bit,Qwen/Qwen3-8B,"16 users, 8k",1,16,8192,512,64,15.27,8.262,121.0,1552.8,1047.8,,,
+16-bit,Qwen/Qwen3-8B,1 user,2,1,256,512,8,15.27,4.084,244.9,242.5,23.8,,,
+16-bit,Qwen/Qwen3-8B,"16 users, short",2,16,256,512,64,15.27,4.261,234.7,3629.5,77.4,,,
+16-bit,Qwen/Qwen3-8B,"16 users, 8k",2,16,8192,512,64,15.27,8.24,121.4,1554.9,1052.0,,,
+16-bit,Qwen/Qwen3-8B,gsm8k,,,,,1319,15.27,,,,,1231,93.3,
+fp4,RedHatAI/Qwen3-8B-NVFP4,1 user,1,1,256,512,8,5.98,2.627,380.6,377.1,14.7,,,
+fp4,RedHatAI/Qwen3-8B-NVFP4,"16 users, short",1,16,256,512,64,5.98,2.83,353.3,5374.8,75.7,,,
+fp4,RedHatAI/Qwen3-8B-NVFP4,"16 users, 8k",1,16,8192,512,64,5.98,6.047,165.4,2234.6,571.2,,,
+fp4,RedHatAI/Qwen3-8B-NVFP4,1 user,2,1,256,512,8,5.98,2.625,381.0,377.9,13.1,,,
+fp4,RedHatAI/Qwen3-8B-NVFP4,"16 users, short",2,16,256,512,64,5.98,2.939,340.2,5209.3,67.0,,,
+fp4,RedHatAI/Qwen3-8B-NVFP4,"16 users, 8k",2,16,8192,512,64,5.98,6.069,164.8,2222.6,579.5,,,
+fp4,RedHatAI/Qwen3-8B-NVFP4,gsm8k,,,,,1319,5.98,,,,,1205,91.4,91.5

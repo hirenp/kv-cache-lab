@@ -1,0 +1,21 @@
+== 16-bit Qwen/Qwen3-8B: healthy after 290s
+se=['triton', 'native']), enable_flashinfer_autotune=True, enable_cutedsl_warmup=True, enable_jit_warmup=True, moe_backend='auto', sparse_indexer_topk_backend='auto', linear_backend='auto', linear_backend_per_quant=None)
+(EngineCore pid=170) INFO 10-04 18:56:24 [cuda.py:538] Using FLASHINFER attention backend out of potential backends: ['FLASHINFER', 'FLASH_ATTN', 'TRITON_ATTN', 'FLEX_ATTENTION'].
+(EngineCore pid=170) INFO 10-04 18:56:56 [model_runner.py:428] Model loading took 15.27 GiB memory and 33.315954 seconds
+(EngineCore pid=170) INFO 10-04 18:56:56 [utils.py:320] Using LBHNC KV cache layout.
+(EngineCore pid=170) INFO 10-04 18:58:44 [gpu_worker.py:640] Available KV cache memory: 145.16 GiB
+ory-utilization=0.9135 without CUDA graph memory profiling. To maintain the same effective KV cache size as before, increase --gpu-memory-utilization to 0.9265. To disable, set VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0.
+(EngineCore pid=170) INFO 10-04 18:58:44 [kv_cache_utils.py:2395] GPU KV cache size: 1,056,992 tokens, Maximum concurrency for 16,384 tokens per request: 64.51x
+16-bit gsm8k: 1231/1319 in 45s
+== fp4 RedHatAI/Qwen3-8B-NVFP4: healthy after 150s
+se=['triton', 'native']), enable_flashinfer_autotune=True, enable_cutedsl_warmup=True, enable_jit_warmup=True, moe_backend='auto', sparse_indexer_topk_backend='auto', linear_backend='auto', linear_backend_per_quant=None)
+(EngineCore pid=1234) INFO 10-04 19:05:45 [cuda.py:538] Using FLASHINFER attention backend out of potential backends: ['FLASHINFER', 'FLASH_ATTN', 'TRITON_ATTN', 'FLEX_ATTENTION'].
+(EngineCore pid=1234) INFO 10-04 19:06:03 [model_runner.py:428] Model loading took 5.98 GiB memory and 19.466800 seconds
+(EngineCore pid=1234) INFO 10-04 19:06:03 [utils.py:320] Using LBHNC KV cache layout.
+(EngineCore pid=1234) INFO 10-04 19:07:13 [gpu_worker.py:640] Available KV cache memory: 153.41 GiB
+ory-utilization=0.9133 without CUDA graph memory profiling. To maintain the same effective KV cache size as before, increase --gpu-memory-utilization to 0.9267. To disable, set VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0.
+(EngineCore pid=1234) INFO 10-04 19:07:13 [kv_cache_utils.py:2395] GPU KV cache size: 1,117,072 tokens, Maximum concurrency for 16,384 tokens per request: 68.18x
+fp4 gsm8k: 1205/1319 in 23s
+versions: flashinfer-python==0.6.18.post1, torch==2.13.0, transformers==5.18.0, vllm==0.30.0
+gpu: NVIDIA B200, 580.95.05, 183359 MiB
+container wall time: 976s
