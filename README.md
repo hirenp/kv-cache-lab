@@ -2,7 +2,7 @@
 
 Prefill vs decode on Apple Silicon, made visible. `kv_lab.py` runs SmolLM2-135M-Instruct one model call at a time, prints the Q/K/V projection shapes for each call, and shows the KV cache growing by one token per decode step.
 
-Write-ups: [part 1](https://hiren.me/posts/watching-a-kv-cache-grow/) (`kv_lab.py`), [part 2](https://hiren.me/posts/watching-a-kv-cache-grow-part-2/) (`kv_bandwidth.py`), [part 3](https://hiren.me/posts/watching-a-kv-cache-grow-part-3/) (`kv_offload.py`). The [inference disaggregation](https://hiren.me/posts/inference-disaggregation-part-1/) series continues with `kv_interference.py` (part 1) and `kv_disagg.py` (part 2), and the [inference in production](https://hiren.me/posts/inference-in-production-part-1/) series with `kv_coldstart.py` (part 2), `kv_failover.py` (parts 3 and 4) and `kv_workload.py` (part 5). [FP4 vs FP16](https://hiren.me/posts/fp4-vs-fp16/) uses `kv_fp4_error.py` and `kv_fp4_serve.py`. The spec the code was built from is in [SPEC.md](SPEC.md).
+Write-ups: [part 1](https://hiren.me/posts/watching-a-kv-cache-grow/) (`kv_lab.py`), [part 2](https://hiren.me/posts/watching-a-kv-cache-grow-part-2/) (`kv_bandwidth.py`), [part 3](https://hiren.me/posts/watching-a-kv-cache-grow-part-3/) (`kv_offload.py`). The [inference disaggregation](https://hiren.me/posts/inference-disaggregation-part-1/) series continues with `kv_interference.py` (part 1) and `kv_disagg.py` (part 2), and the [inference in production](https://hiren.me/posts/inference-in-production-part-1/) series with `kv_coldstart.py` (part 2), `kv_failover.py` (parts 3 and 4) and `kv_workload.py` (part 5). The [weight precision](https://hiren.me/posts/weight-precision-part-1/) series uses `kv_formats.py` (part 1), and `kv_fp4_error.py` and `kv_fp4_serve.py` ([part 2](https://hiren.me/posts/fp4-vs-fp16/)). The spec the code was built from is in [SPEC.md](SPEC.md).
 
 | script | runs on | notes |
 |---|---|---|
@@ -15,6 +15,7 @@ Write-ups: [part 1](https://hiren.me/posts/watching-a-kv-cache-grow/) (`kv_lab.p
 | `kv_workload.py` | Modal, one H100 | about 25 minutes with `--interference-only`, 35 to 40 for everything |
 | `kv_fp4_error.py` | Mac or CPU | under a minute, after a 4 GB download |
 | `kv_fp4_serve.py` | Modal, one B200 | about 16 minutes |
+| `kv_formats.py` | Modal, one B200 and one H100 at the same time | about 30 minutes |
 
 The GPU times are rough wall-clock times from my runs, not billing. Check the usage page on Modal's dashboard after a run.
 
@@ -156,16 +157,18 @@ Keep `--detach` on the runs: the command only starts the work and returns, and w
 
 `kv_workload.py` is the exception. It writes `results_workload*.csv` from the local client when the run ends, so run it without `--detach` and keep the terminal open; if the client exits, Modal stops the run.
 
-## FP4 vs FP16
+## Weight precision
 
 ```
+# On a Modal B200 and H100 at once: Qwen3-8B in BF16, FP8 and NVFP4 (plus an FP8 KV cache on the B200). No --detach.
+modal run kv_formats.py
 # On a laptop: round one Qwen3-8B shard's weight matrices to FP4 four ways
 python kv_fp4_error.py
 # On a Modal B200: Qwen3-8B in BF16, then RedHatAI/Qwen3-8B-NVFP4. No --detach, as kv_workload.py.
 modal run kv_fp4_serve.py
 ```
 
-`kv_fp4_error.py` writes `results_fp4_error.csv`. `kv_fp4_serve.py` writes `results_fp4_serve.csv`, the GSM8K answers in `results_fp4_answers.jsonl`, and server log lines and versions in `results_fp4_serve_notes.txt`.
+`kv_fp4_error.py` writes `results_fp4_error.csv`. `kv_fp4_serve.py` writes `results_fp4_serve.csv`, the GSM8K answers in `results_fp4_answers.jsonl`, and server log lines and versions in `results_fp4_serve_notes.txt`. `kv_formats.py` writes `results_formats.csv` and `results_formats_notes.txt`, which include vLLM's log lines about quantization and fallbacks.
 
 ## Notes
 

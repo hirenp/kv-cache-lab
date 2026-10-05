@@ -830,3 +830,25 @@ vLLM 0.30, one server at a time, prefix caching off, `--max-model-len 16384`. Fo
 3. All 1,319 GSM8K test questions through `/v1/chat/completions`, temperature 0, thinking off, last number after "answer is" compared to the reference. For FP4, also the share of answers identical to the BF16 run.
 
 Output `results_fp4_serve.csv`, `results_fp4_answers.jsonl`, `results_fp4_serve_notes.txt`.
+
+---
+
+# KV Cache Lab V12: Weight precision, part 1
+
+## V12.1 Scope
+
+What does each weight format change when serving the same model? Qwen3-8B in BF16, Qwen/Qwen3-8B-FP8 (block FP8, dynamic activations) and RedHatAI/Qwen3-8B-NVFP4, on one B200 (native FP8 and FP4) and one H100 (native FP8, no FP4). vLLM 0.30, prefix caching off, `--max-model-len 16384`. Both GPUs run at the same time, in `kv_formats.py`.
+
+## V12.2 Configs
+
+B200: BF16, FP8, FP4, and BF16 weights with `--kv-cache-dtype fp8`. H100: BF16, FP8, FP4.
+
+## V12.3 Per config
+
+1. Weight memory ("Model loading took") and KV cache capacity ("GPU KV cache size") from vLLM's startup log, plus any log lines about quantization kernels or fallbacks.
+2. `vllm bench serve`, random dataset, `--ignore-eos`: decode with 1 user (256 in, 512 out), prefill as time to first token for one 8,192-token prompt at a time (8,192 in, 1 out), and decode with 16 users at 8,192 in, 512 out. Each twice, after a discarded warmup.
+3. B200 only: all 1,319 GSM8K test questions, temperature 0, thinking off.
+
+## V12.4 Output
+
+`results_formats.csv` and `results_formats_notes.txt`.
