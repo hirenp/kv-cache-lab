@@ -1,0 +1,58 @@
+[B200] == bf16 Qwen/Qwen3-8B []: healthy after 198s
+se=['triton', 'native']), enable_flashinfer_autotune=True, enable_cutedsl_warmup=True, enable_jit_warmup=True, moe_backend='auto', sparse_indexer_topk_backend='auto', linear_backend='auto', linear_backend_per_quant=None)
+(EngineCore pid=134) INFO 10-05 00:25:36 [model_runner.py:428] Model loading took 15.27 GiB memory and 11.977378 seconds
+Capturing CUDA graphs (PIECEWISE):   0%|          | 0/83 [00:00<?, ?it/s](EngineCore pid=134) WARNING 10-05 00:26:06 [flashinfer.py:723] Using TRTLLM prefill attention (auto-detected).
+(EngineCore pid=134) INFO 10-05 00:26:54 [kv_cache_utils.py:2395] GPU KV cache size: 1,056,992 tokens, Maximum concurrency for 16,384 tokens per request: 64.51x
+:58 [torch_utils.py:275] OMP_NUM_THREADS=8 is set; leaving Torch threads at 8 for serving. Multi-threaded torch CPU ops during serving can degrade performance through spin-wait contention and cgroup CPU-quota throttling.
+ampling parameters have been overridden by the model's `generation_config.json`: `{'temperature': 0.6, 'top_k': 20, 'top_p': 0.95}`. If this is not intended, please relaunch vLLM instance with `--generation-config vllm`.
+[B200] bf16 gsm8k: 1233/1319 in 38s
+[B200] == fp8 Qwen/Qwen3-8B-FP8 []: healthy after 234s
+se=['triton', 'native']), enable_flashinfer_autotune=True, enable_cutedsl_warmup=True, enable_jit_warmup=True, moe_backend='auto', sparse_indexer_topk_backend='auto', linear_backend='auto', linear_backend_per_quant=None)
+(EngineCore pid=1029) INFO 10-05 00:33:03 [model_runner.py:428] Model loading took 8.85 GiB memory and 32.602646 seconds
+Capturing CUDA graphs (PIECEWISE):   0%|          | 0/83 [00:00<?, ?it/s](EngineCore pid=1029) WARNING 10-05 00:33:50 [flashinfer.py:723] Using TRTLLM prefill attention (auto-detected).
+(EngineCore pid=1029) INFO 10-05 00:35:18 [kv_cache_utils.py:2395] GPU KV cache size: 1,100,864 tokens, Maximum concurrency for 16,384 tokens per request: 67.19x
+:53 [torch_utils.py:275] OMP_NUM_THREADS=8 is set; leaving Torch threads at 8 for serving. Multi-threaded torch CPU ops during serving can degrade performance through spin-wait contention and cgroup CPU-quota throttling.
+ampling parameters have been overridden by the model's `generation_config.json`: `{'temperature': 0.6, 'top_k': 20, 'top_p': 0.95}`. If this is not intended, please relaunch vLLM instance with `--generation-config vllm`.
+[B200] fp8 gsm8k: 1231/1319 in 26s
+[B200] == fp4 RedHatAI/Qwen3-8B-NVFP4 []: healthy after 118s
+se=['triton', 'native']), enable_flashinfer_autotune=True, enable_cutedsl_warmup=True, enable_jit_warmup=True, moe_backend='auto', sparse_indexer_topk_backend='auto', linear_backend='auto', linear_backend_per_quant=None)
+(EngineCore pid=2645) INFO 10-05 00:40:31 [model_runner.py:428] Model loading took 5.98 GiB memory and 17.297858 seconds
+Capturing CUDA graphs (PIECEWISE):   0%|          | 0/83 [00:00<?, ?it/s](EngineCore pid=2645) WARNING 10-05 00:41:05 [flashinfer.py:723] Using TRTLLM prefill attention (auto-detected).
+(EngineCore pid=2645) INFO 10-05 00:41:21 [kv_cache_utils.py:2395] GPU KV cache size: 1,117,072 tokens, Maximum concurrency for 16,384 tokens per request: 68.18x
+:39 [torch_utils.py:275] OMP_NUM_THREADS=8 is set; leaving Torch threads at 8 for serving. Multi-threaded torch CPU ops during serving can degrade performance through spin-wait contention and cgroup CPU-quota throttling.
+ampling parameters have been overridden by the model's `generation_config.json`: `{'temperature': 0.6, 'top_k': 20, 'top_p': 0.95}`. If this is not intended, please relaunch vLLM instance with `--generation-config vllm`.
+[B200] fp4 gsm8k: 1205/1319 in 25s
+[B200] == bf16-kv-fp8 Qwen/Qwen3-8B ['--kv-cache-dtype', 'fp8']: healthy after 102s
+se=['triton', 'native']), enable_flashinfer_autotune=True, enable_cutedsl_warmup=True, enable_jit_warmup=True, moe_backend='auto', sparse_indexer_topk_backend='auto', linear_backend='auto', linear_backend_per_quant=None)
+(EngineCore pid=3465) INFO 10-05 00:45:35 [model_runner.py:428] Model loading took 15.27 GiB memory and 4.895823 seconds
+Capturing CUDA graphs (PIECEWISE):   0%|          | 0/83 [00:00<?, ?it/s](EngineCore pid=3465) INFO 10-05 00:46:08 [flashinfer.py:699] Using TRTLLM attention (query is quantized).
+(EngineCore pid=3465) INFO 10-05 00:46:18 [kv_cache_utils.py:2395] GPU KV cache size: 2,113,344 tokens, Maximum concurrency for 16,384 tokens per request: 128.99x
+:40 [torch_utils.py:275] OMP_NUM_THREADS=8 is set; leaving Torch threads at 8 for serving. Multi-threaded torch CPU ops during serving can degrade performance through spin-wait contention and cgroup CPU-quota throttling.
+ampling parameters have been overridden by the model's `generation_config.json`: `{'temperature': 0.6, 'top_k': 20, 'top_p': 0.95}`. If this is not intended, please relaunch vLLM instance with `--generation-config vllm`.
+[B200] bf16-kv-fp8 gsm8k: 1235/1319 in 39s
+[B200] versions: flashinfer-python==0.6.18.post1, torch==2.13.0, transformers==5.18.0, vllm==0.30.0
+[B200] gpu: NVIDIA B200, 580.95.05, 183359 MiB
+[B200] container wall time: 1569s
+[H100] == bf16 Qwen/Qwen3-8B []: healthy after 222s
+se=['triton', 'native']), enable_flashinfer_autotune=True, enable_cutedsl_warmup=True, enable_jit_warmup=True, moe_backend='auto', sparse_indexer_topk_backend='auto', linear_backend='auto', linear_backend_per_quant=None)
+(EngineCore pid=76) INFO 10-05 00:25:48 [model_runner.py:428] Model loading took 15.27 GiB memory and 11.537407 seconds
+(EngineCore pid=76) INFO 10-05 00:26:45 [kv_cache_utils.py:2395] GPU KV cache size: 388,560 tokens, Maximum concurrency for 16,384 tokens per request: 23.72x
+:17 [torch_utils.py:275] OMP_NUM_THREADS=8 is set; leaving Torch threads at 8 for serving. Multi-threaded torch CPU ops during serving can degrade performance through spin-wait contention and cgroup CPU-quota throttling.
+ampling parameters have been overridden by the model's `generation_config.json`: `{'temperature': 0.6, 'top_k': 20, 'top_p': 0.95}`. If this is not intended, please relaunch vLLM instance with `--generation-config vllm`.
+[H100] == fp8 Qwen/Qwen3-8B-FP8 []: healthy after 444s
+se=['triton', 'native']), enable_flashinfer_autotune=True, enable_cutedsl_warmup=True, enable_jit_warmup=True, moe_backend='auto', sparse_indexer_topk_backend='auto', linear_backend='auto', linear_backend_per_quant=None)
+(EngineCore pid=807) INFO 10-05 00:35:21 [model_runner.py:428] Model loading took 8.8 GiB memory and 41.403105 seconds
+(EngineCore pid=807) INFO 10-05 00:39:28 [kv_cache_utils.py:2395] GPU KV cache size: 442,848 tokens, Maximum concurrency for 16,384 tokens per request: 27.03x
+:15 [torch_utils.py:275] OMP_NUM_THREADS=8 is set; leaving Torch threads at 8 for serving. Multi-threaded torch CPU ops during serving can degrade performance through spin-wait contention and cgroup CPU-quota throttling.
+ampling parameters have been overridden by the model's `generation_config.json`: `{'temperature': 0.6, 'top_k': 20, 'top_p': 0.95}`. If this is not intended, please relaunch vLLM instance with `--generation-config vllm`.
+[H100] == fp4 RedHatAI/Qwen3-8B-NVFP4 []: healthy after 132s
+se=['triton', 'native']), enable_flashinfer_autotune=True, enable_cutedsl_warmup=True, enable_jit_warmup=True, moe_backend='auto', sparse_indexer_topk_backend='auto', linear_backend='auto', linear_backend_per_quant=None)
+(EngineCore pid=2362) INFO 10-05 00:46:56 [__init__.py:1180] Using MarlinNvFp4LinearKernel for NVFP4 GEMM
+ur GPU does not have native support for FP4 computation but FP4 quantization is being used. Weight-only FP4 compression will be used leveraging the Marlin kernel. This may degrade performance for compute-heavy workloads.
+(EngineCore pid=2362) INFO 10-05 00:47:05 [model_runner.py:428] Model loading took 6.01 GiB memory and 9.243540 seconds
+(EngineCore pid=2362) INFO 10-05 00:48:06 [kv_cache_utils.py:2395] GPU KV cache size: 464,096 tokens, Maximum concurrency for 16,384 tokens per request: 28.33x
+:21 [torch_utils.py:275] OMP_NUM_THREADS=8 is set; leaving Torch threads at 8 for serving. Multi-threaded torch CPU ops during serving can degrade performance through spin-wait contention and cgroup CPU-quota throttling.
+ampling parameters have been overridden by the model's `generation_config.json`: `{'temperature': 0.6, 'top_k': 20, 'top_p': 0.95}`. If this is not intended, please relaunch vLLM instance with `--generation-config vllm`.
+[H100] versions: flashinfer-python==0.6.18.post1, torch==2.13.0, transformers==5.18.0, vllm==0.30.0
+[H100] gpu: NVIDIA H100 80GB HBM3, 580.95.05, 81559 MiB
+[H100] container wall time: 1754s
