@@ -910,3 +910,23 @@ GPU only; LMCache with 100 GB of CPU memory; LMCache with a local disk (120 GB) 
 
 `results_reuse.csv` and `results_reuse_notes.txt` (GPU only and CPU), `results_reuse_lmcache_disk.csv` and `results_reuse_lmcache_disk_notes.txt` (disk).
 
+## V16.1 Scope
+
+How often are speculative guesses accepted, and what does that do to speed at 1, 8 and 64 users? Qwen3-8B in BF16 on one H100, vLLM 0.30 (`kv_specdec.py`).
+
+## V16.2 Servers
+
+No speculation; n-gram lookup in the prompt (`ngram`, on the CPU) and its GPU version (`ngram_gpu`), both 4 tokens a step, `prompt_lookup_max` 4 and `prompt_lookup_min` 2; and Qwen3-0.6B as a draft model, 4 tokens a step. Prefix caching off.
+
+## V16.3 Tasks
+
+Greedy, thinking off, up to 256 output tokens. GSM8K test questions ("Solve step by step."), and WikiText-2 test passages of 600 to 1,200 characters with "Repeat the following text exactly, then add one sentence that continues it." 16, 48 and 192 requests at 1, 8 and 64 users.
+
+## V16.4 Per server, task and users
+
+Output tokens per second per user (mean over requests) and for the server; guessed and accepted tokens and steps from vLLM's `/metrics`; how many outputs match the no-speculation server's. Each server's startup lines about CUDA graphs, scheduling and speculation go in the notes.
+
+## V16.5 Runs and output
+
+Three runs, each in a fresh container. Run 1 (before `ngram_gpu` was added) was much slower for every speculative server; the post uses run 3, which agreed with run 2. `results_specdec.csv` and `results_specdec_notes.txt` are run 3; `results_specdec_run1*` and `results_specdec_run2*` are runs 1 and 2. All three on an H100 80GB HBM3; the function pins `H100!` after an earlier attempt landed on an H200.
+

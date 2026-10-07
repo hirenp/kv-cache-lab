@@ -1,0 +1,6 @@
+== none: healthy after 326s, args []
+== ngram: healthy after 318s, args ['--speculative-config', '{"method": "ngram", "num_speculative_tokens": 4, "prompt_lookup_max": 4, "prompt_lookup_min": 2}']
+== draft model: healthy after 402s, args ['--speculative-config', '{"method": "draft_model", "model": "Qwen/Qwen3-0.6B", "num_speculative_tokens": 4}']
+versions: torch==2.13.0, transformers==5.18.0, vllm==0.30.0
+gpu: NVIDIA H100 80GB HBM3, 580.95.05, 81559 MiB
+container wall time: 1436s
