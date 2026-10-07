@@ -873,3 +873,19 @@ What runs on the GPU during one decode step, and how much of the step is the GPU
 
 `results_kernels.csv`, `results_kernels_groups.csv` and `results_kernels_notes.txt`.
 
+## V14.1 Scope
+
+How does one GPU serve more users at once? Per-user speed against total throughput as concurrency grows, Qwen3-8B in BF16 on one H100 with vLLM 0.30, prefix caching off (`kv_batching.py`).
+
+## V14.2 Workload
+
+`vllm bench serve`, random dataset, 512-token prompts, 256-token answers, `--ignore-eos`. Users at once: 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, with max(32, 4 x users) requests each. `--max-num-seqs 512`, `--max-model-len 4096`.
+
+## V14.3 Per level, two runs
+
+Mean, median and p99 time per output token; mean time to first token; output tokens per second; and the change in vLLM's preemption counter across the level.
+
+## V14.4 Output
+
+`results_batching.csv` and `results_batching_notes.txt` (server command, KV cache size, versions, GPU).
+

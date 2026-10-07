@@ -1,0 +1,5 @@
+server: vllm serve Qwen/Qwen3-8B --port 8000 --max-model-len 4096 --max-num-seqs 512 --no-enable-prefix-caching; healthy after 230s
+log: (EngineCore pid=74) INFO 10-07 17:40:17 [model_runner.py:428] Model loading took 15.27 GiB memory and 11.450232 seconds | (EngineCore pid=74) INFO 10-07 17:41:18 [kv_cache_utils.py:2395] GPU KV cache size: 390,816 tokens, Maximum concurrency for 4,096 tokens per request: 95.41x
+versions: flashinfer-python==0.6.18.post1, torch==2.13.0, transformers==5.17.0, vllm==0.30.0
+gpu: NVIDIA H100 80GB HBM3, 580.95.05, 81559 MiB
+container wall time: 1167s
