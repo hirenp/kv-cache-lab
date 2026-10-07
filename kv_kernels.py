@@ -6,11 +6,11 @@ One H100. Qwen3-8B in BF16 with Hugging Face transformers and a static KV cache,
 a 256-token prompt. For each of two runs:
   eager:  decode steps launched op by op from Python, timed per step
   graph:  the same step captured once with torch.cuda.graph and replayed, timed per step
-  both:   one profiled step at a time (torch.profiler) for kernel counts, kernel time, the
-          kernel names, and the start and end of every kernel in one step
+  both:   one profiled step at a time (torch.profiler) for kernel counts, kernel time and the
+          kernel names
 Greedy tokens from the eager and graph loops must match. Writes results_kernels.csv,
-results_kernels_groups.csv, results_kernels_timeline.csv and results_kernels_notes.txt from the
-local client, so run it without --detach.
+results_kernels_groups.csv and results_kernels_notes.txt from the local client, so run it
+without --detach.
 """
 import pathlib
 import re
@@ -126,14 +126,14 @@ def run() -> dict:
             advance(out)
         times.sort()
         wall = times[len(times) // 2]
-        kernels, busy, span, timeline, names = profiled(run_step)
+        kernels, busy, span, names = profiled(run_step)
         rows.append(dict(run=rep, case=label, wall_ms=round(wall, 3), tokens_per_s=round(1000 / wall, 1),
                          kernels_per_step=kernels, kernel_ms=round(busy, 3), first_to_last_kernel_ms=round(span, 3),
                          idle_ms=round(wall - busy, 3)))
-        return timeline, names
+        return names
 
     def profiled(run_step):
-        counts, busies, spans, timeline, names = [], [], [], None, {}
+        counts, busies, spans, names = [], [], [], {}
         for i in range(PROFILED):
             torch.cuda.synchronize()
             with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
@@ -157,22 +157,19 @@ def run() -> dict:
             busies.append(merged / 1000)
             spans.append((spans_us[-1][1] - spans_us[0][0]) / 1000 if ks else 0.0)
             if i == PROFILED - 1:
-                t0 = spans_us[0][0]
-                timeline = [(e.name, family(e.name), round(e.time_range.start - t0, 2), round(e.time_range.end - t0, 2)) for e in ks]
                 for e in ks:
                     n = names.setdefault(e.name, [0, 0.0])
                     n[0] += 1
                     n[1] += (e.time_range.end - e.time_range.start) / 1000
             advance(out)
         mid = len(counts) // 2
-        return sorted(counts)[mid], sorted(busies)[mid], sorted(spans)[mid], timeline, names
+        return sorted(counts)[mid], sorted(busies)[mid], sorted(spans)[mid], names
 
-    rows, groups, timelines = [], [], []
+    rows, groups = [], []
     for rep in range(1, REPEATS + 1):
         eager_tokens, graph_tokens = [], []
         advance(prefill())
-        tl, names = timed(step, "eager", rep, rows, eager_tokens)
-        timelines += [dict(run=rep, case="eager", kernel=n, family=f, start_us=s, end_us=e) for n, f, s, e in tl]
+        names = timed(step, "eager", rep, rows, eager_tokens)
         for n, (c, ms) in names.items():
             groups.append(dict(run=rep, case="eager", family=family(n), kernel=n[:160], count=c, ms=round(ms, 4)))
 
@@ -195,8 +192,7 @@ def run() -> dict:
 
             # Restart from a fresh prefill so the graph decodes the same tokens as eager did.
             advance(prefill())
-            tl, names = timed(replay, "cuda graph", rep, rows, graph_tokens)
-            timelines += [dict(run=rep, case="cuda graph", kernel=n, family=f, start_us=s, end_us=e) for n, f, s, e in tl]
+            names = timed(replay, "cuda graph", rep, rows, graph_tokens)
             for n, (c, ms) in names.items():
                 groups.append(dict(run=rep, case="cuda graph", family=family(n), kernel=n[:160], count=c, ms=round(ms, 4)))
             same = eager_tokens == graph_tokens
@@ -205,14 +201,14 @@ def run() -> dict:
         except Exception as e:  # report and keep the eager results
             note(f"run {rep}: CUDA graph capture failed: {type(e).__name__}: {str(e)[:400]}")
     note("decoded text (run 1, eager): " + repr(tok.decode(eager_tokens)[:200]))
-    return dict(rows=rows, groups=groups, timelines=timelines, notes=notes)
+    return dict(rows=rows, groups=groups, notes=notes)
 
 
 @app.local_entrypoint()
 def main():
     import csv
     res = run.remote()
-    for name, key in [("results_kernels.csv", "rows"), ("results_kernels_groups.csv", "groups"), ("results_kernels_timeline.csv", "timelines")]:
+    for name, key in [("results_kernels.csv", "rows"), ("results_kernels_groups.csv", "groups")]:
         rows = res[key]
         if not rows:
             continue

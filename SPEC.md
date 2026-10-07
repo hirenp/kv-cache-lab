@@ -871,5 +871,5 @@ What runs on the GPU during one decode step, and how much of the step is the GPU
 
 ## V13.4 Output
 
-`results_kernels.csv`, `results_kernels_groups.csv`, `results_kernels_timeline.csv` (start and end of every kernel in one profiled step) and `results_kernels_notes.txt`.
+`results_kernels.csv`, `results_kernels_groups.csv` and `results_kernels_notes.txt`.
 

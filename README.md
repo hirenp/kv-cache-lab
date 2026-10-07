@@ -174,7 +174,7 @@ modal run kv_fp4_serve.py
 modal run kv_kernels.py
 ```
 
-`kv_kernels.py` writes `results_kernels.csv`, `results_kernels_groups.csv`, `results_kernels_timeline.csv` and `results_kernels_notes.txt`.
+`kv_kernels.py` writes `results_kernels.csv`, `results_kernels_groups.csv` and `results_kernels_notes.txt`.
 
 `kv_fp4_error.py` writes `results_fp4_error.csv`. `kv_fp4_serve.py` writes `results_fp4_serve.csv`, the GSM8K answers in `results_fp4_answers.jsonl`, and server log lines and versions in `results_fp4_serve_notes.txt`. `kv_formats.py` writes `results_formats.csv` and `results_formats_notes.txt`, which include vLLM's log lines about quantization and fallbacks.
 
