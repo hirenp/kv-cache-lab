@@ -889,3 +889,24 @@ Mean, median and p99 time per output token; mean time to first token; output tok
 
 `results_batching.csv` and `results_batching_notes.txt` (server command, KV cache size, versions, GPU).
 
+## V15.1 Scope
+
+What does reusing a KV cache save, and what happens when it's evicted? Qwen3-8B in BF16 on one H100, vLLM 0.30 with prefix caching on, LMCache 0.5.5 for offloading (`kv_reuse.py`).
+
+## V15.2 Requests
+
+Prompts as token IDs: a document of random tokens (its own seed) plus a 32-token question, `max_tokens` 1, one request at a time, so latency is time to first token. A request over 2 minutes counts as a failure for that server.
+
+## V15.3 Cases
+
+1. Hit vs miss (GPU only): 1k, 4k and 16k documents, 3 each; the first request, then the same document with a new question.
+2. Eviction (all servers, twice): a 16k document, the same again, then enough other 16k documents to fill the GPU cache 1.5 times, then the first document again.
+
+## V15.4 Servers
+
+GPU only; LMCache with 100 GB of CPU memory; LMCache with a local disk (120 GB) and a 20 GB CPU buffer. With a 2 GB buffer, the disk server stalled waiting for CPU space, so the disk run uses 20 GB, run separately with `--only 'lmcache disk'`.
+
+## V15.5 Output
+
+`results_reuse.csv` and `results_reuse_notes.txt` (GPU only and CPU), `results_reuse_lmcache_disk.csv` and `results_reuse_lmcache_disk_notes.txt` (disk).
+
