@@ -852,3 +852,24 @@ B200: BF16, FP8, FP4, and BF16 weights with `--kv-cache-dtype fp8`. H100: BF16, 
 ## V12.4 Output
 
 `results_formats.csv` and `results_formats_notes.txt`.
+
+## V13.1 Scope
+
+What runs on the GPU during one decode step, and how much of the step is the GPU waiting for the CPU to launch work? Qwen3-8B in BF16 with Hugging Face transformers and a static KV cache, batch 1, a 256-token prompt, one H100 (`kv_kernels.py`).
+
+## V13.2 Cases
+
+1. Eager: each decode step launched op by op from Python.
+2. CUDA graph: the same step captured once with `torch.cuda.graph` and replayed. The KV cache, inputs and attention mask are fixed tensors updated in place between steps, so the graph always reads the right memory.
+
+## V13.3 Per case, two runs
+
+1. Wall time per step: the median of 20 steps, each between two `torch.cuda.synchronize()` calls, after 5 warmup steps.
+2. One `torch.profiler` profile per step for 5 steps: kernels per step, GPU kernel time (the union of kernel intervals), and first-to-last kernel time. The profiler slows kernel launches, so profiled eager steps are longer than timed ones.
+3. Every kernel's name, count and time in the last profiled step, grouped by name into matrix multiply, attention, reduction, copy or concat, elementwise and other.
+4. Correctness: the eager and graph loops must decode the same greedy tokens.
+
+## V13.4 Output
+
+`results_kernels.csv`, `results_kernels_groups.csv`, `results_kernels_timeline.csv` (start and end of every kernel in one profiled step) and `results_kernels_notes.txt`.
+
