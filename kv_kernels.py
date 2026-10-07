@@ -47,7 +47,7 @@ def family(name: str) -> str:
     return "other"
 
 
-@app.function(gpu="H100", cpu=8.0, memory=65536, image=image, volumes={"/hf": hf_cache}, timeout=3600)
+@app.function(gpu="H100!", cpu=8.0, memory=65536, image=image, volumes={"/hf": hf_cache}, timeout=3600)
 def run() -> dict:
     import os
     os.environ["HF_HOME"] = "/hf"
