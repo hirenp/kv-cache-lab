@@ -30,7 +30,7 @@ SEED = 0
 REPEATS = 2
 
 
-@app.function(gpu="H100", cpu=8.0, memory=65536, image=image, volumes={"/hf": hf_cache}, timeout=3600)
+@app.function(gpu="H100!", cpu=8.0, memory=65536, image=image, volumes={"/hf": hf_cache}, timeout=3600)
 def run() -> dict:
     import json, os, re, subprocess, urllib.request
 
