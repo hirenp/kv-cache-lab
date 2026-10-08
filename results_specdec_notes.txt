@@ -1,0 +1,37 @@
+== none: healthy after 188s, args []
+none startup lines (3):
+  ], gelu_and_mul_sparse=['triton', 'native']), enable_flashinfer_autotune=True, enable_cutedsl_warmup=True, enable_jit_warmup=True, moe_backend='auto', sparse_indexer_topk_backend='auto', linear_backend='auto', linear_backend_per_quant=None)
+   WARNING 10-07 19:23:41 [torch_utils.py:275] OMP_NUM_THREADS=8 is set; leaving Torch threads at 8 for serving. Multi-threaded torch CPU ops during serving can degrade performance through spin-wait contention and cgroup CPU-quota throttling.
+  1772] Default vLLM sampling parameters have been overridden by the model's `generation_config.json`: `{'temperature': 0.6, 'top_k': 20, 'top_p': 0.95}`. If this is not intended, please relaunch vLLM instance with `--generation-config vllm`.
+== ngram: healthy after 192s, args ['--speculative-config', '{"method": "ngram", "num_speculative_tokens": 4, "prompt_lookup_max": 4, "prompt_lookup_min": 2}']
+ngram startup lines (8):
+  lt args: {'model_tag': 'Qwen/Qwen3-8B', 'model': 'Qwen/Qwen3-8B', 'max_model_len': 4096, 'enable_prefix_caching': False, 'speculative_config': {'method': 'ngram', 'num_speculative_tokens': 4, 'prompt_lookup_max': 4, 'prompt_lookup_min': 2}}
+  (APIServer pid=612) WARNING 10-07 19:25:32 [vllm.py:1457] Async scheduling not supported with ngram-based speculative decoding and will be disabled.
+  (APIServer pid=612) WARNING 10-07 19:25:32 [vllm.py:716] Model Runner V2 does not yet support speculative method 'ngram'; using the V1 model runner instead.
+  ], gelu_and_mul_sparse=['triton', 'native']), enable_flashinfer_autotune=True, enable_cutedsl_warmup=True, enable_jit_warmup=True, moe_backend='auto', sparse_indexer_topk_backend='auto', linear_backend='auto', linear_backend_per_quant=None)
+  (EngineCore pid=640) WARNING 10-07 19:25:49 [vllm.py:716] Model Runner V2 does not yet support speculative method 'ngram'; using the V1 model runner instead.
+  (EngineCore pid=640) WARNING 10-07 19:25:51 [__init__.py:205] min_p and logit_bias parameters won't work with speculative decoding.
+   WARNING 10-07 19:28:23 [torch_utils.py:275] OMP_NUM_THREADS=8 is set; leaving Torch threads at 8 for serving. Multi-threaded torch CPU ops during serving can degrade performance through spin-wait contention and cgroup CPU-quota throttling.
+  1772] Default vLLM sampling parameters have been overridden by the model's `generation_config.json`: `{'temperature': 0.6, 'top_k': 20, 'top_p': 0.95}`. If this is not intended, please relaunch vLLM instance with `--generation-config vllm`.
+== ngram on gpu: healthy after 196s, args ['--speculative-config', '{"method": "ngram_gpu", "num_speculative_tokens": 4, "prompt_lookup_max": 4, "prompt_lookup_min": 2}']
+ngram on gpu startup lines (7):
+  rgs: {'model_tag': 'Qwen/Qwen3-8B', 'model': 'Qwen/Qwen3-8B', 'max_model_len': 4096, 'enable_prefix_caching': False, 'speculative_config': {'method': 'ngram_gpu', 'num_speculative_tokens': 4, 'prompt_lookup_max': 4, 'prompt_lookup_min': 2}}
+  (APIServer pid=1128) WARNING 10-07 19:29:54 [vllm.py:716] Model Runner V2 does not yet support speculative method 'ngram_gpu'; using the V1 model runner instead.
+  ], gelu_and_mul_sparse=['triton', 'native']), enable_flashinfer_autotune=True, enable_cutedsl_warmup=True, enable_jit_warmup=True, moe_backend='auto', sparse_indexer_topk_backend='auto', linear_backend='auto', linear_backend_per_quant=None)
+  (EngineCore pid=1156) WARNING 10-07 19:30:07 [vllm.py:716] Model Runner V2 does not yet support speculative method 'ngram_gpu'; using the V1 model runner instead.
+  (EngineCore pid=1156) WARNING 10-07 19:30:28 [__init__.py:205] min_p and logit_bias parameters won't work with speculative decoding.
+   WARNING 10-07 19:32:49 [torch_utils.py:275] OMP_NUM_THREADS=8 is set; leaving Torch threads at 8 for serving. Multi-threaded torch CPU ops during serving can degrade performance through spin-wait contention and cgroup CPU-quota throttling.
+  1772] Default vLLM sampling parameters have been overridden by the model's `generation_config.json`: `{'temperature': 0.6, 'top_k': 20, 'top_p': 0.95}`. If this is not intended, please relaunch vLLM instance with `--generation-config vllm`.
+== draft model: healthy after 220s, args ['--speculative-config', '{"method": "draft_model", "model": "Qwen/Qwen3-0.6B", "num_speculative_tokens": 4}']
+draft model startup lines (8):
+  286] non-default args: {'model_tag': 'Qwen/Qwen3-8B', 'model': 'Qwen/Qwen3-8B', 'max_model_len': 4096, 'enable_prefix_caching': False, 'speculative_config': {'method': 'draft_model', 'model': 'Qwen/Qwen3-0.6B', 'num_speculative_tokens': 4}}
+  (APIServer pid=1696) INFO 10-07 19:34:21 [speculative.py:1651] Overriding draft model max model len from 40960 to 4096
+  (APIServer pid=1696) WARNING 10-07 19:34:21 [vllm.py:716] Model Runner V2 does not yet support speculative method 'draft_model'; using the V1 model runner instead.
+  ], gelu_and_mul_sparse=['triton', 'native']), enable_flashinfer_autotune=True, enable_cutedsl_warmup=True, enable_jit_warmup=True, moe_backend='auto', sparse_indexer_topk_backend='auto', linear_backend='auto', linear_backend_per_quant=None)
+  (EngineCore pid=1724) WARNING 10-07 19:34:35 [vllm.py:716] Model Runner V2 does not yet support speculative method 'draft_model'; using the V1 model runner instead.
+  (EngineCore pid=1724) WARNING 10-07 19:34:36 [__init__.py:205] min_p and logit_bias parameters won't work with speculative decoding.
+   WARNING 10-07 19:37:40 [torch_utils.py:275] OMP_NUM_THREADS=8 is set; leaving Torch threads at 8 for serving. Multi-threaded torch CPU ops during serving can degrade performance through spin-wait contention and cgroup CPU-quota throttling.
+  1772] Default vLLM sampling parameters have been overridden by the model's `generation_config.json`: `{'temperature': 0.6, 'top_k': 20, 'top_p': 0.95}`. If this is not intended, please relaunch vLLM instance with `--generation-config vllm`.
+versions: torch==2.13.0, transformers==5.18.0, vllm==0.30.0
+gpu: NVIDIA H100 80GB HBM3, 580.95.05, 81559 MiB
+container wall time: 1092s
