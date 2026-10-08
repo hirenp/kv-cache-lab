@@ -1,0 +1,6 @@
+gpu: NVIDIA H100 80GB HBM3, 580.95.05, 81559 MiB
+torch 2.14.1+cu130, transformers 5.19.0, cuda 13.0
+model Qwen/Qwen3-8B, attention sdpa, layers 36
+run 1: graph tokens match eager: True (20 tokens)
+run 2: graph tokens match eager: True (20 tokens)
+decoded text (run 1, eager): ' of France is Paris. Paris is a major city in France, known for its museums. The capital'

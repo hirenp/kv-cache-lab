@@ -1,0 +1,5 @@
+run,case,wall_ms,tokens_per_s,kernels_per_step,kernel_ms,first_to_last_kernel_ms,idle_ms
+1,eager,29.347,34.1,2398,10.066,49.148,19.281
+1,cuda graph,13.235,75.6,2399,9.815,11.001,3.42
+2,eager,37.379,26.8,2398,10.084,50.292,27.294
+2,cuda graph,13.147,76.1,2399,9.883,11.045,3.264
